@@ -2,7 +2,7 @@
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Event } from "@/lib/types";
-import { EditEventForm } from "./EditEventForm";
+import EditEventForm from "./EditEventForm";
 
 interface EventModalProps {
     event: Event | null;

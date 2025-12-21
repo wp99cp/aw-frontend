@@ -36,12 +36,8 @@ import {
     CommandItem,
     CommandList,
 } from "@/components/ui/command";
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn, getHumanReadableBucketName } from "@/lib/utils";
 import { CategoryClass } from "@/lib/categories";
 import Link from "next/link";
 import { format } from "date-fns";
@@ -58,40 +54,17 @@ import { Settings, classifyEvent } from "@/lib/categories";
 import { Bucket } from "@/lib/types";
 import { EventModal } from "@/components/events/EventModal";
 
-// Helper function to generate meaningful event preview
-function getEventPreview(event: Event): { primary: string; secondary?: string } {
-    const data = event.data;
+import { getEventPreview } from "@/lib/event-utils";
 
-    // For VS Code / editor events - show project name first, filename second
-    if (data.file) {
-        const filename = (data.file as string).split('/').pop() || data.file;
-        const project = data.project ? (data.project as string).split('/').pop() : undefined;
-        return {
-            primary: project || filename as string,
-            secondary: project ? filename as string : undefined
-        };
+export function getHumanReadableType(type: string): string {
+    switch (type) {
+        case "afkstatus": return "AFK Status";
+        case "app.editor.activity": return "Editor Activity";
+        case "currentwindow": return "Window";
+        case "web.tab.current": return "Web Tab";
+        case "manual": return "Manual Entry";
+        default: return type;
     }
-
-    // For web events - use title first, then url
-    if (data.title) {
-        return { primary: data.title };
-    }
-
-    if (data.url) {
-        return { primary: data.url };
-    }
-
-    // For AFK events - show status
-    if (data.status) {
-        return { primary: data.status === 'not-afk' ? 'Active' : 'Away from keyboard' };
-    }
-
-    // For window events - use title (already has app shown separately)
-    if (data.app && !data.title && !data.file) {
-        return { primary: data.app };
-    }
-
-    return { primary: "Untitled" };
 }
 
 export default function EventsPage() {
@@ -229,7 +202,7 @@ export default function EventsPage() {
         const ids = new Set(events.map(e => e.bucketId).filter(Boolean));
         return Array.from(ids).map(id => ({
             id: id!,
-            name: buckets[id!]?.data?.label as string || buckets[id!]?.name || id!
+            name: getHumanReadableBucketName(id!, buckets[id!]?.data?.label as string)
         })).sort((a, b) => a.name.localeCompare(b.name));
     }, [events, buckets]);
 
@@ -251,13 +224,17 @@ export default function EventsPage() {
 
     // Reset pagination when filters change
     useEffect(() => {
-        setCurrentPage(1);
+        setTimeout(() => {
+            setCurrentPage(1);
+        }, 0);
     }, [searchQuery, date]);
 
     // Ensure we don't stay on a non-existent page if data shrinks
     useEffect(() => {
         if (currentPage > totalPages && totalPages > 0) {
-            setCurrentPage(totalPages);
+            setTimeout(() => {
+                setCurrentPage(totalPages);
+            }, 0);
         }
     }, [totalPages, currentPage]);
 
@@ -425,7 +402,7 @@ export default function EventsPage() {
                             <SelectContent>
                                 <SelectItem value="all">All Types</SelectItem>
                                 {uniqueTypes.map(t => (
-                                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                                    <SelectItem key={t} value={t}>{getHumanReadableType(t)}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>

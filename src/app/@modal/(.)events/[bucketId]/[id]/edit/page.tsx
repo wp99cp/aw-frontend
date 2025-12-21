@@ -3,7 +3,7 @@
 import { use, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useRouter } from "next/navigation";
-import { EditEventForm } from "@/components/events/EditEventForm";
+import EditEventForm from "@/components/events/EditEventForm";
 
 type Params = Promise<{ bucketId: string; id: string }>;
 

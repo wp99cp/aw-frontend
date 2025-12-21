@@ -48,7 +48,7 @@ export const api = {
         }),
 
     query: (payload: Query) =>
-        fetcher<any>("/query/", {
+        fetcher<unknown>("/query/", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),

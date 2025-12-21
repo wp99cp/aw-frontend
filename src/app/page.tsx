@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { fetchAllEvents } from "@/lib/data";
-import { buildSunburstData, Settings } from "@/lib/categories";
+import { buildSunburstData, Settings, SunburstNode } from "@/lib/categories";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,17 +15,25 @@ import { CategorySummary } from "@/components/dashboard/CategorySummary";
 import { ActivityTimer } from "@/components/dashboard/ActivityTimer";
 
 import { CategoryEventsList } from "@/components/dashboard/CategoryEventsList";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Event } from "@/lib/types";
 
 const MANUAL_BUCKET_ID = "aw-watcher-manual-nextjs";
 
 type TimeRange = "today" | "yesterday" | "last7days" | "thisMonth" | "thisYear";
 
 export default function Home() {
-  const [chartData, setChartData] = useState<any>(null);
+  const [chartData, setChartData] = useState<SunburstNode | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>("today");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [selectedCategory, setSelectedCategory] = useState<any>(null);
+
+  const [selectedCategory, setSelectedCategory] = useState<SunburstNode | null>(null);
+
+  // Data state
+  const [rawEvents, setRawEvents] = useState<Event[]>([]);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [includeAfk, setIncludeAfk] = useState(false);
 
   const getDateRange = (range: TimeRange) => {
     const now = new Date();
@@ -74,26 +82,28 @@ export default function Home() {
       const { start, end } = getDateRange(timeRange);
 
       // Fetch settings for categories
-      let settings: Settings | null = null;
+      let fetchedSettings: Settings | null = null;
       try {
-        settings = await api.getSettings();
+        fetchedSettings = await api.getSettings();
+        setSettings(fetchedSettings);
       } catch (e) {
         console.warn("Could not fetch settings", e);
       }
 
       // Fetch ALL events for the chart
       const allEvents = await fetchAllEvents(start, end);
+      setRawEvents(allEvents);
 
-      if (settings && settings.classes) {
-        setChartData(buildSunburstData(allEvents, settings.classes));
-      } else {
-        setChartData(buildSunburstData(allEvents, []));
-      }
+      // Initial process will be triggered by useEffect
 
     } catch (err) {
       console.error(err);
       setLoading(false);
     } finally {
+      // Don't set loading false here, wait for processing? 
+      // Actually we can set loading false here, but chartData might be null for a split second.
+      // Better to keep loading true until chartData is ready?
+      // For simplicity, let's keep loading=false here, user might see "No data" briefly.
       setLoading(false);
     }
   };
@@ -102,11 +112,36 @@ export default function Home() {
     fetchData();
   }, [timeRange]);
 
+  useEffect(() => {
+    if (!rawEvents) return;
+
+    let filteredEvents = rawEvents;
+
+    if (!includeAfk) {
+      filteredEvents = rawEvents.filter(e => e.data.status !== "afk");
+    }
+
+    if (settings && settings.classes) {
+      setChartData(buildSunburstData(filteredEvents, settings.classes));
+    } else {
+      setChartData(buildSunburstData(filteredEvents, []));
+    }
+  }, [rawEvents, includeAfk, settings]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <div className="flex items-center space-x-2 w-full sm:w-auto">
+        <div className="flex items-center space-x-4 w-full sm:w-auto flex-wrap gap-y-2">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="include-afk"
+              checked={includeAfk}
+              onChange={(e) => setIncludeAfk(e.target.checked)}
+            />
+            <Label htmlFor="include-afk" className="text-sm cursor-pointer">Include AFK</Label>
+          </div>
+
           <Select value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Select range" />
@@ -151,7 +186,7 @@ export default function Home() {
               chartData ? (
                 <SunburstChart
                   data={chartData}
-                  onCategorySelect={(node: any) => setSelectedCategory(node)}
+                  onCategorySelect={(node: SunburstNode | null) => setSelectedCategory(node)}
                 />
               ) : <div>No data</div>}
           </CardContent>

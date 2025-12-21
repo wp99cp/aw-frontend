@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { EditEventForm } from "@/components/events/EditEventForm";
+import EditEventForm from "@/components/events/EditEventForm";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
 type Params = Promise<{ bucketId: string; id: string }>;

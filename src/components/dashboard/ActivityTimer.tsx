@@ -12,18 +12,21 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
 import { Play, Square, Pause, Save, X, Edit2, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Event } from "@/lib/types";
+import { EventModal } from "@/components/events/EventModal";
 
 const MANUAL_BUCKET_ID = "aw-watcher-manual-nextjs";
 
@@ -42,12 +45,37 @@ export function ActivityTimer({ onActivityLogged }: { onActivityLogged?: () => v
 
     // Edit Dialog State
     const [editingEvent, setEditingEvent] = useState<Event | null>(null);
-    const [editForm, setEditForm] = useState({
-        title: "",
-        category: "",
-        startTime: "",
-        durationMinutes: 0
-    });
+    const [eventToDelete, setEventToDelete] = useState<Event | null>(null);
+
+
+
+
+    const loadRecentEvents = async () => {
+        try {
+            // Check/Create bucket with correct type 'manual' first
+            try {
+                const bucket = await api.getBucket(MANUAL_BUCKET_ID);
+                if (bucket.type !== "manual") {
+                    await api.createBucket(MANUAL_BUCKET_ID, {
+                        client: "aw-watcher-manual-nextjs",
+                        type: "manual",
+                        hostname: "nextjs-app",
+                    });
+                }
+            } catch {
+                await api.createBucket(MANUAL_BUCKET_ID, {
+                    client: "aw-watcher-manual-nextjs",
+                    type: "manual",
+                    hostname: "nextjs-app",
+                });
+            }
+
+            const events = await api.getEvents(MANUAL_BUCKET_ID, { limit: 3 });
+            setRecentEvents(events);
+        } catch (e) {
+            console.error("Failed to load recent events", e);
+        }
+    };
 
     // Initial Load
     useEffect(() => {
@@ -92,32 +120,7 @@ export function ActivityTimer({ onActivityLogged }: { onActivityLogged?: () => v
         return () => clearInterval(interval);
     }, [startTime, isPaused, accumulated]);
 
-    const loadRecentEvents = async () => {
-        try {
-            // Check/Create bucket with correct type 'manual' first
-            try {
-                const bucket = await api.getBucket(MANUAL_BUCKET_ID);
-                if (bucket.type !== "manual") {
-                    await api.createBucket(MANUAL_BUCKET_ID, {
-                        client: "aw-watcher-manual-nextjs",
-                        type: "manual",
-                        hostname: "nextjs-app",
-                    });
-                }
-            } catch {
-                await api.createBucket(MANUAL_BUCKET_ID, {
-                    client: "aw-watcher-manual-nextjs",
-                    type: "manual",
-                    hostname: "nextjs-app",
-                });
-            }
 
-            const events = await api.getEvents(MANUAL_BUCKET_ID, { limit: 3 });
-            setRecentEvents(events);
-        } catch (e) {
-            console.error("Failed to load recent events", e);
-        }
-    };
 
     const handleStart = () => {
         if (!title.trim()) {
@@ -179,6 +182,7 @@ export function ActivityTimer({ onActivityLogged }: { onActivityLogged?: () => v
 
         try {
             // Timestamp is end time minus duration
+            // eslint-disable-next-line react-hooks/purity
             const timestamp = new Date(Date.now() - finalDuration * 1000).toISOString();
 
             await api.createEvent(MANUAL_BUCKET_ID, {
@@ -218,54 +222,31 @@ export function ActivityTimer({ onActivityLogged }: { onActivityLogged?: () => v
 
     const openEditDialog = (event: Event) => {
         setEditingEvent(event);
-        setEditForm({
-            title: event.data.title || "",
-            category: (event.data.category as string) || "",
-            startTime: new Date(event.timestamp).toISOString().slice(0, 16), // format for datetime-local
-            durationMinutes: parseFloat((event.duration / 60).toFixed(2))
-        });
     };
 
-    const handleSaveEdit = async () => {
-        if (!editingEvent || !editingEvent.id) return;
-
-        try {
-            // 1. Delete old
-            await api.deleteEvent(MANUAL_BUCKET_ID, editingEvent.id);
-
-            // 2. Create new
-            await api.createEvent(MANUAL_BUCKET_ID, {
-                timestamp: new Date(editForm.startTime).toISOString(),
-                duration: editForm.durationMinutes * 60,
-                data: {
-                    app: "Manual Activity",
-                    title: editForm.title,
-                    category: editForm.category,
-                }
-            });
-
-            toast.success("Activity updated");
-            setEditingEvent(null);
-            loadRecentEvents();
-            if (onActivityLogged) onActivityLogged();
-        } catch (e) {
-            console.error(e);
-            toast.error("Failed to update activity");
-        }
+    const handleModalSave = () => {
+        setEditingEvent(null);
+        loadRecentEvents();
+        if (onActivityLogged) onActivityLogged();
     };
 
-    const handleDeleteRecent = async (event: Event) => {
-        if (!event.id) return;
-        if (!confirm("Delete this activity?")) return;
+    const handleDeleteRecent = (event: Event) => {
+        setEventToDelete(event);
+    };
+
+    const confirmDelete = async () => {
+        if (!eventToDelete || !eventToDelete.id) return;
 
         try {
-            await api.deleteEvent(MANUAL_BUCKET_ID, event.id);
+            await api.deleteEvent(MANUAL_BUCKET_ID, eventToDelete.id);
             toast.success("Activity deleted");
             loadRecentEvents();
             if (onActivityLogged) onActivityLogged();
         } catch (e) {
             console.error(e);
             toast.error("Failed to delete activity");
+        } finally {
+            setEventToDelete(null);
         }
     };
 
@@ -376,61 +357,30 @@ export function ActivityTimer({ onActivityLogged }: { onActivityLogged?: () => v
                     </div>
                 )}
 
-                {/* Edit Dialog */}
-                <Dialog open={!!editingEvent} onOpenChange={(open) => !open && setEditingEvent(null)}>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Edit Activity</DialogTitle>
-                            <DialogDescription>Modify activity details.</DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4 py-2">
-                            <div className="space-y-2">
-                                <Label>Activity Name</Label>
-                                <Input
-                                    value={editForm.title}
-                                    onChange={e => setEditForm({ ...editForm, title: e.target.value })}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Category</Label>
-                                <Select
-                                    value={editForm.category}
-                                    onValueChange={val => setEditForm({ ...editForm, category: val })}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select category" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Start Time</Label>
-                                    <Input
-                                        type="datetime-local"
-                                        value={editForm.startTime}
-                                        onChange={e => setEditForm({ ...editForm, startTime: e.target.value })}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Duration (min)</Label>
-                                    <Input
-                                        type="number"
-                                        step="0.1"
-                                        value={editForm.durationMinutes}
-                                        onChange={e => setEditForm({ ...editForm, durationMinutes: parseFloat(e.target.value) })}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                        <DialogFooter>
-                            <Button variant="outline" onClick={() => setEditingEvent(null)}>Cancel</Button>
-                            <Button onClick={handleSaveEdit}>Save Changes</Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                {/* Edit Modal */}
+                <EventModal
+                    isOpen={!!editingEvent}
+                    event={editingEvent}
+                    onClose={() => setEditingEvent(null)}
+                    onSave={handleModalSave}
+                />
+
+                <AlertDialog open={!!eventToDelete} onOpenChange={(open) => !open && setEventToDelete(null)}>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                This will permanently delete this activity.
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                Delete
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
             </CardContent>
         </Card>
     );

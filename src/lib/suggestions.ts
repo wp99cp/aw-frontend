@@ -6,11 +6,13 @@ export interface RegexSuggestion {
     type: "app" | "domain" | "title" | "composite";
 }
 
-// Common stop words to exclude from frequency analysis (60+ meaningless words)
+// Common stop words to exclude from frequency analysis
 const STOP_WORDS = new Set([
     // Basic English stop words
     "the", "and", "or", "to", "in", "on", "at", "of", "for", "with", "by", "from", "up", "about",
     "into", "over", "after", "is", "a", "an", "my", "your", "this", "that", "it", "as", "be", "was",
+    "are", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "must", "shall", "can", "need", "dare", "ought", "used", "not",
 
     // Common UI/browser terms
     "new", "tab", "window", "document", "page", "home", "dashboard", "profile", "settings", "search",
@@ -39,7 +41,44 @@ const STOP_WORDS = new Set([
 
     // Misc common
     "activitywatch", "untitled", "unknown", "default", "general", "basic", "advanced", "custom",
-    "online", "offline", "public", "private", "user", "account", "login", "logout", "sign"
+    "online", "offline", "public", "private", "user", "account", "login", "logout", "sign",
+
+    // ActivityWatch specific / tracking terms
+    "watcher", "activity", "tracker", "tracking", "watch", "monitor", "frontend", "backend",
+
+    // Programming/development terms (often too generic)
+    "python", "javascript", "typescript", "node", "react", "nextjs", "next", "build", "best",
+    "alternative", "code", "coding", "project", "projects", "repo", "repository", "github",
+    "gitlab", "bitbucket", "version", "release", "master", "main", "branch", "commit",
+
+    // Common web terms
+    "http", "https", "www", "html", "css", "json", "xml", "api", "rest", "websocket",
+
+    // Common adjectives and descriptors (too generic for categorization)
+    "free", "open", "cross", "platform", "extensible", "simple", "easy", "fast", "quick",
+    "small", "large", "big", "full", "modern", "powerful", "lightweight", "flexible",
+    "secure", "safe", "smart", "clean", "beautiful", "awesome", "great", "good", "nice",
+    "super", "ultra", "pro", "lite", "plus", "mini", "max", "premium", "enterprise",
+    "personal", "professional", "portable", "native", "hybrid", "official", "unofficial",
+    "beta", "alpha", "stable", "experimental", "preview", "demo", "sample", "example",
+    "test", "testing", "debug", "development", "production", "staging", "local",
+
+    // Common nouns used in software descriptions
+    "tool", "tools", "utility", "utilities", "library", "framework", "plugin", "extension",
+    "module", "package", "component", "system", "service", "server", "client", "manager",
+    "viewer", "editor", "reader", "writer", "builder", "generator", "converter", "compiler",
+    "installer", "launcher", "runner", "helper", "handler", "wrapper", "interface", "guide",
+    "documentation", "docs", "manual", "tutorial", "readme", "changelog", "license",
+
+    // German common words (since you have German content)
+    "eine", "einen", "einer", "eines", "einem", "der", "die", "das", "den", "dem", "des",
+    "und", "oder", "aber", "wenn", "dann", "auch", "noch", "schon", "hier", "dort",
+    "konfigurieren", "konfigurierung", "remote", "repository", "fork", "pull", "request",
+
+    // Common filler words
+    "using", "based", "built", "made", "written", "powered", "inspired", "designed",
+    "created", "developed", "maintained", "supported", "available", "compatible", "works",
+    "automated", "automatic", "dynamic", "static", "interactive", "integrated", "unified"
 ]);
 
 export function generateRegexSuggestions(group: UncategorizedGroup): RegexSuggestion[] {
@@ -47,16 +86,18 @@ export function generateRegexSuggestions(group: UncategorizedGroup): RegexSugges
     const seen = new Set<string>();
 
     const addSuggestion = (label: string, regex: string, type: RegexSuggestion["type"]) => {
-        if (!seen.has(regex)) {
+        // Also check if the regex itself is a stop word (case-insensitive)
+        if (!seen.has(regex.toLowerCase()) && !STOP_WORDS.has(regex.toLowerCase())) {
             suggestions.push({ label, regex, type });
-            seen.add(regex);
+            seen.add(regex.toLowerCase());
         }
     };
 
-    // 1. App Name (Exact)
-    // Escape special characters for regex
+    // 1. App Name (Exact) - only if not a stop word
     const escapedApp = escapeRegex(group.appName);
-    addSuggestion(`App: ${group.appName}`, escapedApp, "app");
+    if (!STOP_WORDS.has(group.appName.toLowerCase())) {
+        addSuggestion(`App: ${group.appName}`, escapedApp, "app");
+    }
 
     // 2. Domain (if website)
     if (group.isWebsite && group.domain) {
@@ -65,7 +106,8 @@ export function generateRegexSuggestions(group: UncategorizedGroup): RegexSugges
     }
 
     // 3. Frequent words in titles
-    const wordCounts = new Map<string, number>();
+    // Use lowercase as key to avoid case-sensitive duplicates, store original casing for display
+    const wordCounts = new Map<string, { original: string; count: number }>();
     group.events.forEach(e => {
         const title = e.data.title;
         if (title && typeof title === "string") {
@@ -74,7 +116,12 @@ export function generateRegexSuggestions(group: UncategorizedGroup): RegexSugges
             words.forEach(w => {
                 const lower = w.toLowerCase();
                 if (w.length > 3 && !STOP_WORDS.has(lower) && Number.isNaN(Number(w))) {
-                    wordCounts.set(w, (wordCounts.get(w) || 0) + 1);
+                    const existing = wordCounts.get(lower);
+                    if (existing) {
+                        existing.count += 1;
+                    } else {
+                        wordCounts.set(lower, { original: w, count: 1 });
+                    }
                 }
             });
         }
@@ -82,16 +129,16 @@ export function generateRegexSuggestions(group: UncategorizedGroup): RegexSugges
 
     // Sort by frequency
     const sortedWords = Array.from(wordCounts.entries())
-        .sort((a, b) => b[1] - a[1])
+        .sort((a, b) => b[1].count - a[1].count)
         .slice(0, 5); // Take top 5
 
-    sortedWords.forEach(([word, count]) => {
+    sortedWords.forEach(([lowerWord, { original, count }]) => {
         // Only suggest if it appears in a significant portion of events (e.g., > 20% or if count > 2)
         if (count > 2 || count / group.events.length > 0.2) {
-            addSuggestion(`Word: ${word}`, word, "title");
-            // Also suggest App + Word composite if app is generic
-            if (group.appName && !group.isWebsite) {
-                addSuggestion(`App + "${word}"`, `${escapedApp}.*${word}`, "composite");
+            addSuggestion(`Word: ${original}`, original, "title");
+            // Also suggest App + Word composite if app is generic and app name isn't a stop word
+            if (group.appName && !group.isWebsite && !STOP_WORDS.has(group.appName.toLowerCase())) {
+                addSuggestion(`App + "${original}"`, `${escapedApp}.*${original}`, "composite");
             }
         }
     });

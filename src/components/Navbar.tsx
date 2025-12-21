@@ -12,8 +12,9 @@ export function Navbar() {
     const routes = [
         { href: "/", label: "Dashboard" },
         { href: "/events", label: "Events" },
+        { href: "/wizard", label: "Category Wizard" },
         { href: "/rules", label: "Rules" },
-        { href: "/wizard", label: "Wizard" },
+        { href: "/timeline", label: "Timeline" },
         { href: "/stats", label: "Reports" },
     ];
 

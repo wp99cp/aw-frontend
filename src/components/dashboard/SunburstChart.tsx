@@ -5,9 +5,25 @@ import { ResponsiveSunburst } from "@nivo/sunburst";
 import { Button } from "@/components/ui/button";
 import { RotateCcw } from "lucide-react";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function SunburstChart({ data, onCategorySelect }: { data: any, onCategorySelect?: (node: any) => void }) {
-    const [root, setRoot] = useState(data);
+// Helper to strictly limit depth of the tree for display
+import { SunburstNode } from "@/lib/categories";
+
+// Helper to strictly limit depth of the tree for display
+function limitDepth(node: SunburstNode, depth: number, currentDepth = 0): SunburstNode {
+    if (currentDepth >= depth) {
+        return { ...node, children: [] };
+    }
+    if (!node.children || node.children.length === 0) {
+        return node;
+    }
+    return {
+        ...node,
+        children: node.children.map((child: SunburstNode) => limitDepth(child, depth, currentDepth + 1))
+    };
+}
+
+export function SunburstChart({ data, onCategorySelect }: { data: SunburstNode, onCategorySelect?: (node: SunburstNode | null) => void }) {
+    const [root, setRoot] = useState<SunburstNode>(data);
 
     useEffect(() => {
         setRoot(data);
@@ -51,7 +67,7 @@ export function SunburstChart({ data, onCategorySelect }: { data: any, onCategor
                 </Button>
             )}
             <ResponsiveSunburst
-                data={root}
+                data={limitDepth(root, 2)}
                 margin={{ top: 10, right: 10, bottom: 10, left: 10 }}
                 id="name"
                 value="value"

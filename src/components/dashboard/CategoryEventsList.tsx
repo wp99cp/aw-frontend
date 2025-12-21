@@ -5,9 +5,12 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import { format } from "date-fns";
 import { Event } from "@/lib/types";
+import { getEventPreview } from "@/lib/event-utils";
+
+import { SunburstNode } from "@/lib/categories";
 
 interface CategoryEventsListProps {
-    node: any;
+    node: SunburstNode;
     onBack: () => void;
 }
 
@@ -39,20 +42,29 @@ export function CategoryEventsList({ node, onBack }: CategoryEventsListProps) {
                     <div className="text-center text-muted-foreground py-8">No events found</div>
                 ) : (
                     <div className="space-y-4">
-                        {sortedEvents.map((event, i) => (
-                            <div key={i} className="flex flex-col space-y-1 border-b pb-2 last:border-0 last:pb-0">
-                                <div className="flex items-center justify-between">
-                                    <span className="font-semibold truncate w-2/3">{event.data.title || "Untitled"}</span>
-                                    <span className="text-xs text-muted-foreground">
-                                        {format(new Date(event.timestamp), "HH:mm")}
-                                    </span>
+                        {sortedEvents.map((event, i) => {
+                            const preview = getEventPreview(event);
+                            return (
+                                <div key={i} className="flex flex-col space-y-1 border-b pb-2 last:border-0 last:pb-0">
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-semibold truncate w-2/3" title={preview.primary}>{preview.primary}</span>
+                                        <span className="text-xs text-muted-foreground">
+                                            {format(new Date(event.timestamp), "HH:mm")}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-sm">
+                                        <div className="flex items-center gap-2 text-muted-foreground truncate w-1/2">
+                                            {preview.secondary ? (
+                                                <span title={preview.secondary}>{preview.secondary}</span>
+                                            ) : (
+                                                <span>{event.data.app}</span>
+                                            )}
+                                        </div>
+                                        <span>{(event.duration / 60).toFixed(1)} min</span>
+                                    </div>
                                 </div>
-                                <div className="flex items-center justify-between text-sm">
-                                    <span className="text-muted-foreground truncate w-1/2">{event.data.app}</span>
-                                    <span>{(event.duration / 60).toFixed(1)} min</span>
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </CardContent>

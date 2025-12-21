@@ -13,10 +13,9 @@ import { Badge } from "@/components/ui/badge";
 import { Check, Wand2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { generateRegexSuggestions, RegexSuggestion } from "@/lib/suggestions";
+import { generateRegexSuggestions, RegexSuggestion } from "@/actions/suggestions";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { EventModal } from "@/components/events/EventModal";
 
 
 
@@ -107,7 +106,7 @@ export default function WizardPage() {
             // Filter logic
             if (filter === "websites" && !url) continue;
             if (filter === "apps" && url) continue; // Approximate: events with URL are "websites", others are "apps"
-            if (app === "Unknown" && !url) continue;
+            if (app.toLowerCase() === "unknown" && !url) continue;
 
             let key = app;
             let displayApp = app;
@@ -149,11 +148,11 @@ export default function WizardPage() {
         setGroups(result);
     };
 
-    const handleSelectGroup = (g: UncategorizedGroup) => {
+    const handleSelectGroup = async (g: UncategorizedGroup) => {
         setSelectedGroup(g);
 
-        // Generate regex suggestions
-        const suggestions = generateRegexSuggestions(g);
+        // Generate regex suggestions (server action)
+        const suggestions = await generateRegexSuggestions(g);
         setRegexSuggestions(suggestions);
 
         // Default to the first suggestion if available, otherwise fallback to app name/domain logic
@@ -162,17 +161,24 @@ export default function WizardPage() {
 
         if (filterType === "websites" && g.domain) {
             setNewCategoryName(g.domain);
-            // setNewRegex(g.domain); // Let user pick from suggestions, or default to first?
             if (suggestions.length > 0) {
                 setNewRegex(suggestions[0].regex);
             } else {
                 setNewRegex(g.domain);
             }
-
         } else {
+            // Pick a reasonable default for category name
+            // If the top suggestion is a title/domain and has a high score, maybe it's better?
+            // For now, keep app name as default but if the top suggestion is high score, use it for regex
             setNewCategoryName(g.appName);
+
             if (suggestions.length > 0) {
                 setNewRegex(suggestions[0].regex);
+                // If it's a very high confidence title suggestion, maybe it should be the category name too?
+                // e.g. "pnpm" instead of "Terminator"
+                if (suggestions[0].type === "title" && (suggestions[0].score || 0) > 0.8) {
+                    setNewCategoryName(suggestions[0].regex);
+                }
             } else {
                 setNewRegex(g.appName);
             }
@@ -335,17 +341,42 @@ export default function WizardPage() {
                                             onChange={(e) => setNewCategoryName(e.target.value)}
                                             placeholder="e.g. Work > Programming"
                                         />
-                                        <div className="flex flex-wrap gap-2">
-                                            {existingCategories.slice(0, 8).map(cat => (
-                                                <Badge
-                                                    key={cat}
-                                                    variant="secondary"
-                                                    className="cursor-pointer hover:bg-secondary/80"
-                                                    onClick={() => applySuggestion(cat)}
-                                                >
-                                                    {cat}
-                                                </Badge>
-                                            ))}
+
+                                        {regexSuggestions.filter(s => s.type === "title").length > 0 && (
+                                            <div className="space-y-2">
+                                                <Label className="text-xs text-muted-foreground font-semibold">Suggested from Title:</Label>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {regexSuggestions.filter(s => s.type === "title").slice(0, 6).map((s, idx) => (
+                                                        <Badge
+                                                            key={idx}
+                                                            variant="outline"
+                                                            className="cursor-pointer hover:bg-primary/20"
+                                                            onClick={() => {
+                                                                setNewCategoryName(s.regex);
+                                                                setNewRegex(s.regex);
+                                                            }}
+                                                        >
+                                                            {s.regex}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="space-y-2">
+                                            <Label className="text-xs text-muted-foreground font-semibold">Existing Categories:</Label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {existingCategories.slice(0, 8).map(cat => (
+                                                    <Badge
+                                                        key={cat}
+                                                        variant="secondary"
+                                                        className="cursor-pointer hover:bg-secondary/80"
+                                                        onClick={() => applySuggestion(cat)}
+                                                    >
+                                                        {cat}
+                                                    </Badge>
+                                                ))}
+                                            </div>
                                         </div>
                                         <p className="text-xs text-muted-foreground">
                                             Tip: Use &quot; &gt; &quot; to create subcategories. Click a suggestion above to use it.
@@ -412,59 +443,11 @@ export default function WizardPage() {
                 </div>
             </div>
 
-            <Dialog open={!!viewingEvent} onOpenChange={(open) => !open && setViewingEvent(null)}>
-                <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                        <DialogTitle>Event Details</DialogTitle>
-                        <DialogDescription>
-                            Detailed information about this specific event.
-                        </DialogDescription>
-                    </DialogHeader>
-                    {viewingEvent && (
-                        <div className="grid gap-4 py-4">
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label className="text-right">Timestamp</Label>
-                                <div className="col-span-3 text-sm">
-                                    {new Date(viewingEvent.timestamp).toLocaleString()}
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label className="text-right">App Name</Label>
-                                <div className="col-span-3 text-sm font-mono bg-muted p-1 rounded">
-                                    {viewingEvent.data.app || "N/A"}
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label className="text-right">Window Title</Label>
-                                <div className="col-span-3 text-sm font-mono bg-muted p-1 rounded truncate">
-                                    {viewingEvent.data.title || "N/A"}
-                                </div>
-                            </div>
-                            {viewingEvent.data.url && (
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">URL</Label>
-                                    <div className="col-span-3 text-sm font-mono bg-muted p-1 rounded truncate">
-                                        {viewingEvent.data.url}
-                                    </div>
-                                </div>
-                            )}
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label className="text-right">Duration</Label>
-                                <div className="col-span-3 text-sm">
-                                    {viewingEvent.duration.toFixed(1)} seconds
-                                </div>
-                            </div>
-
-                            <div className="border-t pt-4 mt-2">
-                                <Label className="mb-2 block">Raw Data</Label>
-                                <ScrollArea className="h-[200px] w-full rounded-md border p-4 bg-muted/50 font-mono text-xs">
-                                    <pre>{JSON.stringify(viewingEvent, null, 2)}</pre>
-                                </ScrollArea>
-                            </div>
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+            <EventModal
+                isOpen={!!viewingEvent}
+                event={viewingEvent}
+                onClose={() => setViewingEvent(null)}
+            />
         </div>
     );
 }

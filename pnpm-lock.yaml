@@ -65,6 +65,9 @@ importers:
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.3)
+      most-common-words-by-language:
+        specifier: ^3.0.14
+        version: 3.0.14
       next:
         specifier: 16.1.0
         version: 16.1.0(@babel/core@7.28.5)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -2164,6 +2167,9 @@ packages:
 
   minimist@1.2.8:
     resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
+
+  most-common-words-by-language@3.0.14:
+    resolution: {integrity: sha512-BNlYDDfDgXVFbXO0aqdyno4Gboh6kOTM6r3ZIrLF6BUyrI/LlZwl3Q8cvYBbUBFjcKk81kAlUgemgfO6Dspy9Q==}
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
@@ -4877,6 +4883,8 @@ snapshots:
       brace-expansion: 2.0.2
 
   minimist@1.2.8: {}
+
+  most-common-words-by-language@3.0.14: {}
 
   ms@2.1.3: {}
 
