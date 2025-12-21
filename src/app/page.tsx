@@ -12,7 +12,7 @@ import Link from "next/link";
 import { subDays, startOfMonth, startOfYear, startOfDay, endOfDay } from "date-fns";
 import { SunburstChart } from "@/components/dashboard/SunburstChart";
 import { CategorySummary } from "@/components/dashboard/CategorySummary";
-import { ActivityTimer } from "@/components/dashboard/ActivityTimer";
+import { TimelineSection } from "@/components/timeline/TimelineSection";
 
 import { CategoryEventsList } from "@/components/dashboard/CategoryEventsList";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -132,42 +132,43 @@ export default function Home() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <div className="flex items-center space-x-4 w-full sm:w-auto flex-wrap gap-y-2">
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="include-afk"
-              checked={includeAfk}
-              onChange={(e) => setIncludeAfk(e.target.checked)}
-            />
-            <Label htmlFor="include-afk" className="text-sm cursor-pointer">Include AFK</Label>
-          </div>
-
-          <Select value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Select range" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="yesterday">Yesterday</SelectItem>
-              <SelectItem value="last7days">Last 7 Days</SelectItem>
-              <SelectItem value="thisMonth">This Month</SelectItem>
-              <SelectItem value="thisYear">This Year</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Button variant="outline" size="icon" onClick={fetchData}>
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          </Button>
-          <Button asChild>
-            <Link href="/events/new">
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Add Activity
-            </Link>
-          </Button>
-        </div>
       </div>
 
-      <ActivityTimer onActivityLogged={fetchData} />
+      <TimelineSection />
+
+      <div className="flex items-center justify-end space-x-4 w-full flex-wrap gap-y-2">
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            id="include-afk"
+            checked={includeAfk}
+            onChange={(e) => setIncludeAfk(e.target.checked)}
+          />
+          <Label htmlFor="include-afk" className="text-sm cursor-pointer">Include AFK</Label>
+        </div>
+
+        <Select value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Select range" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="today">Today</SelectItem>
+            <SelectItem value="yesterday">Yesterday</SelectItem>
+            <SelectItem value="last7days">Last 7 Days</SelectItem>
+            <SelectItem value="thisMonth">This Month</SelectItem>
+            <SelectItem value="thisYear">This Year</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Button variant="outline" size="icon" onClick={fetchData}>
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        </Button>
+        <Button asChild>
+          <Link href="/events/new">
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Add Activity
+          </Link>
+        </Button>
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card className="col-span-1 md:col-span-2">

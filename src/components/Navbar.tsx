@@ -13,8 +13,8 @@ export function Navbar() {
         { href: "/", label: "Dashboard" },
         { href: "/events", label: "Events" },
         { href: "/wizard", label: "Category Wizard" },
-        { href: "/rules", label: "Rules" },
-        { href: "/timeline", label: "Timeline" },
+        { href: "/rules", label: "Categories & Rules" },
+
         { href: "/stats", label: "Reports" },
     ];
 

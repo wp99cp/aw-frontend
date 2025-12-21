@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useTransition } from "react";
 import { format, addDays, subDays, startOfDay, endOfDay } from "date-fns";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Filter, Minus, Check, Loader2 } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Filter, Minus, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -53,16 +53,6 @@ function getAllDescendants(node: CategoryNode): string[] {
     return result;
 }
 
-function getAllPaths(nodes: CategoryNode[]): string[] {
-    const result: string[] = [];
-    nodes.forEach(node => {
-        result.push(...getAllDescendants(node));
-    });
-    return result;
-}
-
-type CheckState = "checked" | "unchecked" | "indeterminate";
-
 function getCheckState(node: CategoryNode, selectedCategories: string[]): CheckState {
     const allDescendants = getAllDescendants(node);
     const selectedCount = allDescendants.filter(d => selectedCategories.includes(d)).length;
@@ -71,6 +61,8 @@ function getCheckState(node: CategoryNode, selectedCategories: string[]): CheckS
     if (selectedCount === allDescendants.length) return "checked";
     return "indeterminate";
 }
+
+type CheckState = "checked" | "unchecked" | "indeterminate";
 
 interface CategoryItemProps {
     node: CategoryNode;
@@ -119,7 +111,7 @@ function CategoryItem({ node, depth, selectedCategories, onToggle }: CategoryIte
     );
 }
 
-export default function TimelinePage() {
+export function TimelineSection() {
     const [date, setDate] = useState<Date>(new Date());
     const [loading, setLoading] = useState(true);
     const [autoEvents, setAutoEvents] = useState<Event[]>([]);
@@ -260,9 +252,9 @@ export default function TimelinePage() {
     }, [autoEvents, manualEvents, deferredCategories, settings]);
 
     return (
-        <div className="container mx-auto py-6 space-y-6">
+        <div className="space-y-4">
             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-                <h1 className="text-3xl font-bold">Timeline</h1>
+                <h2 className="text-xl font-semibold">Timeline</h2>
 
                 <div className="flex items-center gap-2">
                     <Button variant="outline" size="icon" onClick={() => setDate(subDays(date, 1))}>
@@ -372,3 +364,4 @@ export default function TimelinePage() {
         </div>
     );
 }
+
