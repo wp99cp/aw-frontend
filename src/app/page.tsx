@@ -197,9 +197,10 @@ export default function Home() {
           <CategoryEventsList
             node={selectedCategory}
             onBack={() => setSelectedCategory(null)}
+            onActivityLogged={fetchData}
           />
         ) : (
-          <CategorySummary data={chartData} timeRange={timeRange} />
+          <CategorySummary data={chartData} timeRange={timeRange} onActivityLogged={fetchData} />
         )}
       </div>
     </div>

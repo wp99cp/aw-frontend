@@ -4,7 +4,9 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { Event } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { formatDuration } from "@/lib/event-utils";
 import { DraftSelection, ZoomRange } from "./TimelineView";
+import { CategoryClass, classifyEvent } from "@/lib/categories";
 
 interface ManualLaneProps {
     date: Date;
@@ -16,9 +18,10 @@ interface ManualLaneProps {
     onGuideChange: (lines: number[]) => void;
     onEventClick?: (event: Event) => void;
     snapPoints?: number[];
+    classes?: CategoryClass[];
 }
 
-export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoomRange, onGuideChange, onEventClick, snapPoints = [] }: ManualLaneProps) {
+export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoomRange, onGuideChange, onEventClick, snapPoints = [], classes = [] }: ManualLaneProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [dragMode, setDragMode] = useState<"create" | "move" | "resize-start" | "resize-end" | null>(null);
 
@@ -28,7 +31,7 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
     const [initialDraft, setInitialDraft] = useState<DraftSelection | null>(null);
 
     // Helper: Snap logic
-    // Strong snap to snapPoints (e.g. boot times), then 5-min raster
+    // Strong snap to snapPoints (e.g. boot times), then adaptive raster based on zoom
     const snapTime = useCallback((rawMinutes: number) => {
         // 1. Check strong snap points (threshold: ~8 mins to be "stronger" than 5 min raster)
         const SNAP_THRESHOLD = 8;
@@ -48,9 +51,14 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
             return bestSnap;
         }
 
-        // 2. Fallback to 5-min grid
-        return Math.round(rawMinutes / 5) * 5;
-    }, [snapPoints]);
+        // 2. Fallback to adaptive grid based on zoom level
+        // High resolution (zoomed in to less than 2 hours): 1-min grid
+        // Normal: 5-min grid
+        const visibleRange = zoomRange.end - zoomRange.start;
+        const gridSize = visibleRange <= 120 ? 1 : 5;
+
+        return Math.round(rawMinutes / gridSize) * gridSize;
+    }, [snapPoints, zoomRange]);
 
     const getMinutesFromX = (x: number) => {
         if (!containerRef.current) return 0;
@@ -102,8 +110,8 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [dragMode, draft, initialDraft, onDraftChange, onGuideChange]);
 
-    const findMostActiveApp = (startMin: number, endMin: number): string | undefined => {
-        const usageMap = new Map<string, number>();
+    const findMajorityCategory = (startMin: number, endMin: number): string | undefined => {
+        const categoryDurationMap = new Map<string, number>();
 
         autoEvents.forEach(e => {
             const eDate = new Date(e.timestamp);
@@ -116,23 +124,33 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
 
             if (overlapEnd > overlapStart) {
                 const duration = overlapEnd - overlapStart;
-                const app = e.data.app || "Unknown";
-                usageMap.set(app, (usageMap.get(app) || 0) + duration);
+
+                // Classify the event to get its category
+                const classification = classifyEvent(e, classes);
+                const categoryKey = classification
+                    ? classification.name.join(" > ")
+                    : "Uncategorized";
+
+                categoryDurationMap.set(categoryKey, (categoryDurationMap.get(categoryKey) || 0) + duration);
             }
         });
 
-        if (usageMap.size === 0) return undefined;
+        if (categoryDurationMap.size === 0) return undefined;
 
-        let maxApp = undefined;
+        let maxCategory: string | undefined = undefined;
         let maxDuration = 0;
 
-        for (const [app, duration] of usageMap.entries()) {
+        for (const [category, duration] of categoryDurationMap.entries()) {
             if (duration > maxDuration) {
                 maxDuration = duration;
-                maxApp = app;
+                maxCategory = category;
             }
         }
-        return maxApp;
+
+        // Don't suggest "Uncategorized" as it's not helpful
+        if (maxCategory === "Uncategorized") return undefined;
+
+        return maxCategory;
     };
 
     const onMouseDown = (e: React.MouseEvent) => {
@@ -175,7 +193,7 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
         if (dragMode === "create" && anchor !== null) {
             const s = Math.min(anchor, snapped);
             const e = Math.max(anchor, snapped);
-            onDraftChange({ start: s, end: e, suggestedApp: undefined });
+            onDraftChange({ start: s, end: e, suggestedCategory: undefined });
             onGuideChange([s, e]);
         }
         else if (dragMode === "move" && draft) {
@@ -207,10 +225,10 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
 
     const handleMouseUp = () => {
         if ((dragMode === "create" || dragMode === "resize-start" || dragMode === "resize-end") && draft) {
-            // Analyze app suggestion on drop/resize finish
-            const app = findMostActiveApp(draft.start, draft.end);
-            if (app) {
-                onDraftChange({ ...draft, suggestedApp: app });
+            // Analyze category suggestion on drop/resize finish
+            const category = findMajorityCategory(draft.start, draft.end);
+            if (category) {
+                onDraftChange({ ...draft, suggestedCategory: category });
             }
         }
         setDragMode(null);
@@ -243,10 +261,16 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
         return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
     };
 
-    // Category Colors (Simple hash or specific mapping)
-    const getCategoryColor = (cat: string) => {
-        // We could use the user's settings if we passed them down, 
-        // but for now let's use a consistent hash-based color or simple palette
+    // Get event color from category classification
+    const getEventColor = (event: Event) => {
+        // Classify the event to get its color
+        const classification = classifyEvent(event, classes);
+        if (classification?.color) {
+            return classification.color;
+        }
+
+        // Fallback: hash-based color from app name
+        const cat = event.data.app || "Event";
         let hash = 0;
         for (let i = 0; i < cat.length; i++) {
             hash = cat.charCodeAt(i) + ((hash << 5) - hash);
@@ -275,7 +299,6 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
                     const d = new Date(e.timestamp);
                     const start = d.getHours() * 60 + d.getMinutes();
                     const end = start + (e.duration / 60);
-                    const cat = e.data.app || "Event";
 
                     // Optimization: visible only?
                     if (end < zoomRange.start || start > zoomRange.end) return null;
@@ -284,10 +307,10 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
                         <Tooltip key={e.id || i}>
                             <TooltipTrigger asChild>
                                 <div
-                                    className="absolute top-1 bottom-1 rounded-sm shadow-sm z-10 hover:brightness-110 flex items-center justify-center overflow-hidden px-1 border border-white/10"
+                                    className="absolute top-1 bottom-1 rounded-sm z-10 hover:brightness-110 flex items-center justify-center overflow-hidden px-1 border border-white/10"
                                     style={{
                                         ...getStyle(start, end),
-                                        backgroundColor: getCategoryColor(cat)
+                                        backgroundColor: getEventColor(e)
                                     }}
                                     onMouseDown={(ev) => ev.stopPropagation()}
                                     onClick={(ev) => {
@@ -301,7 +324,7 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
                                     }}
                                 >
                                     <div className="flex flex-col items-center justify-center w-full overflow-hidden">
-                                        <span className="text-xs font-semibold text-white truncate w-full text-center shadow-sm leading-tight">
+                                        <span className="text-xs font-semibold text-white truncate w-full text-center leading-tight">
                                             {e.data.title || e.data.app || "Event"}
                                         </span>
                                         {e.data.description && (
@@ -359,8 +382,8 @@ export function ManualLane({ date, events, autoEvents, draft, onDraftChange, zoo
                     <TooltipContent side="top" className="bg-blue-600 text-white border-blue-700">
                         <p className="font-mono font-bold">{ft(draft.start)} - {ft(draft.end)}</p>
                         <p className="text-xs text-blue-100">
-                            {draft.end - draft.start} min
-                            {draft.suggestedApp && ` • Suggested: ${draft.suggestedApp}`}
+                            {formatDuration((draft.end - draft.start) * 60)}
+                            {draft.suggestedCategory && ` • Category: ${draft.suggestedCategory}`}
                         </p>
                     </TooltipContent>
                 </Tooltip>

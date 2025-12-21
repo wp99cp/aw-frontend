@@ -59,8 +59,14 @@ export async function fetchAllEvents(start: Date, end: Date): Promise<Event[]> {
 
         const results = await Promise.all(promises);
 
-        // Flatten and sort
-        const allEvents = results.flat();
+        // Flatten and filter out "unknown" placeholder events
+        const allEvents = results.flat().filter(e => {
+            // Exclude events where both app and title are "unknown"
+            if (e.data.app === "unknown" && e.data.title === "unknown") {
+                return false;
+            }
+            return true;
+        });
 
         // Sort events by timestamp descending
         allEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());

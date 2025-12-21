@@ -32,6 +32,14 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectSeparator,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 
 
@@ -41,6 +49,7 @@ export const formSchema = z.object({
     }),
     description: z.string().optional(),
     tags: z.string().optional(), // Comma separated for input, parsed on submit
+    category: z.string().optional(), // Store joined path "Work > Programming"
     durationMinutes: z.coerce.number().min(1, {
         message: "Duration must be at least 1 minute.",
     }),
@@ -51,13 +60,29 @@ export const formSchema = z.object({
 interface EventFormProps {
     initialValues?: Partial<z.infer<typeof formSchema>>;
     onSuccess?: () => void;
+    categories?: string[]; // Available categories from parent
 }
 
-export function EventForm({ initialValues, onSuccess }: EventFormProps) {
+export function EventForm({ initialValues, onSuccess, categories: propCategories }: EventFormProps) {
     const router = useRouter();
     const [submitting, setSubmitting] = useState(false);
     const [tagsList, setTagsList] = useState<string[]>([]);
     const [tagInput, setTagInput] = useState("");
+    const [categories, setCategories] = useState<string[]>(propCategories || []);
+
+    // Fetch categories if not provided via props
+    useEffect(() => {
+        if (propCategories && propCategories.length > 0) {
+            setCategories(propCategories);
+            return;
+        }
+        api.getSettings().then(settings => {
+            if (settings && settings.classes) {
+                const paths = settings.classes.map(c => c.name.join(" > "));
+                setCategories(paths);
+            }
+        });
+    }, [propCategories]);
 
     const form = useForm({
         resolver: zodResolver(formSchema),
@@ -65,6 +90,7 @@ export function EventForm({ initialValues, onSuccess }: EventFormProps) {
             title: "",
             description: "",
             tags: "",
+            category: "",
             durationMinutes: 60,
             date: new Date().toISOString().split("T")[0],
             time: new Date().toTimeString().split(" ")[0].substring(0, 5),
@@ -107,7 +133,10 @@ export function EventForm({ initialValues, onSuccess }: EventFormProps) {
                 data: {
                     title: values.title,
                     description: values.description,
-                    tags: tagsList
+                    tags: tagsList,
+                    category: (values.category && values.category !== "_NO_CATEGORY_")
+                        ? values.category.split(" > ")
+                        : undefined
                 }
             };
 
@@ -158,6 +187,46 @@ export function EventForm({ initialValues, onSuccess }: EventFormProps) {
                     )}
                 />
 
+                <FormField
+                    control={form.control}
+                    name="category"
+                    render={({ field }) => {
+                        const isCustomCategory = field.value &&
+                            field.value !== "_NO_CATEGORY_" &&
+                            !categories.includes(field.value);
+
+                        return (
+                            <FormItem>
+                                <FormLabel>Category</FormLabel>
+                                <Select onValueChange={field.onChange} defaultValue={field.value} value={field.value || ""}>
+                                    <FormControl>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select a category" />
+                                        </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                        <SelectItem value="_NO_CATEGORY_">No Category</SelectItem>
+                                        <SelectSeparator />
+                                        {isCustomCategory && (
+                                            <>
+                                                <SelectItem value={field.value || ""}>
+                                                    {field.value} (Suggested)
+                                                </SelectItem>
+                                                <SelectSeparator />
+                                            </>
+                                        )}
+                                        {categories.map((cat) => (
+                                            <SelectItem key={cat} value={cat}>
+                                                {cat}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <FormMessage />
+                            </FormItem>
+                        );
+                    }}
+                />
 
                 {/* Tags Section */}
                 <div className="space-y-2">

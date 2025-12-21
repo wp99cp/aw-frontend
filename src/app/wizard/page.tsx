@@ -91,8 +91,8 @@ export default function WizardPage() {
         const ruleClasses = currentSettings.classes || [];
 
         for (const ev of events) {
-            const category = classifyEvent(ev, ruleClasses);
-            if (!category || category.length === 0 || category[0] === "Uncategorized") {
+            const result = classifyEvent(ev, ruleClasses);
+            if (!result || result.name.length === 0 || result.name[0] === "Uncategorized") {
                 uncategorized.push(ev);
             }
         }

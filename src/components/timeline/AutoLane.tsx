@@ -5,14 +5,17 @@ import { Event } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ZoomRange } from "./TimelineView";
+import { formatDuration } from "@/lib/event-utils";
+import { CategoryClass, classifyEvent } from "@/lib/categories";
 
 interface AutoLaneProps {
     events: Event[];
     zoomRange: ZoomRange;
     onZoomChange: (range: ZoomRange) => void;
+    classes?: CategoryClass[];
 }
 
-export function AutoLane({ events, zoomRange, onZoomChange }: AutoLaneProps) {
+export function AutoLane({ events, zoomRange, onZoomChange, classes = [] }: AutoLaneProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [isSelecting, setIsSelecting] = useState(false);
     const [selection, setSelection] = useState<{ start: number, end: number } | null>(null);
@@ -31,13 +34,19 @@ export function AutoLane({ events, zoomRange, onZoomChange }: AutoLaneProps) {
         };
     };
 
-    // Color mapping based on app name
-    const getColor = (app?: string) => {
-        if (!app) return "bg-gray-400";
-        if (app.includes("Code") || app.includes("Terminal")) return "bg-blue-500";
-        if (app.includes("Chrome") || app.includes("Firefox")) return "bg-orange-400";
-        if (app.includes("Slack") || app.includes("Discord")) return "bg-purple-500";
-        return "bg-slate-500";
+    // Get color from category classification, with fallback
+    const getColor = (event: Event): string | undefined => {
+        const classification = classifyEvent(event, classes);
+        if (classification?.color) {
+            return classification.color;
+        }
+        // Fallback colors based on app name
+        const app = event.data.app;
+        if (!app) return undefined;
+        if (app.includes("Code") || app.includes("Terminal")) return "#3b82f6"; // blue-500
+        if (app.includes("Chrome") || app.includes("Firefox")) return "#fb923c"; // orange-400
+        if (app.includes("Slack") || app.includes("Discord")) return "#a855f7"; // purple-500
+        return "#64748b"; // slate-500
     };
 
     const getMinutesFromX = (x: number, rect: DOMRect) => {
@@ -108,18 +117,18 @@ export function AutoLane({ events, zoomRange, onZoomChange }: AutoLaneProps) {
                         <Tooltip key={event.id || i}>
                             <TooltipTrigger asChild>
                                 <div
-                                    className={cn(
-                                        "absolute top-0 bottom-0 hover:brightness-110 transition-all opacity-80",
-                                        getColor(event.data.app)
-                                    )}
-                                    style={style}
+                                    className="absolute top-0 bottom-0 hover:brightness-110 transition-all opacity-80"
+                                    style={{
+                                        ...style,
+                                        backgroundColor: getColor(event) || '#94a3b8'
+                                    }}
                                 />
                             </TooltipTrigger>
                             <TooltipContent>
                                 <div className="text-xs">
                                     <div className="font-bold">{event.data.app}</div>
                                     <div>{event.data.title}</div>
-                                    <div>{Math.round(event.duration)}s</div>
+                                    <div>{formatDuration(event.duration)}</div>
                                     <div className="text-muted-foreground">{date.toLocaleTimeString()}</div>
                                 </div>
                             </TooltipContent>

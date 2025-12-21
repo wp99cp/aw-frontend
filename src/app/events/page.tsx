@@ -161,7 +161,7 @@ export default function EventsPage() {
         if (selectedCategory !== "all" && settings) {
             res = res.filter(e => {
                 const cat = classifyEvent(e, settings.classes);
-                const catStr = cat ? cat.join(" > ") : "Uncategorized";
+                const catStr = cat ? cat.name.join(" > ") : "Uncategorized";
                 return catStr === selectedCategory;
             });
         }
@@ -188,7 +188,7 @@ export default function EventsPage() {
         const cats = new Set<string>();
         events.forEach(e => {
             const c = classifyEvent(e, settings.classes);
-            cats.add(c ? c.join(" > ") : "Uncategorized");
+            cats.add(c ? c.name.join(" > ") : "Uncategorized");
         });
         return Array.from(cats).sort();
     }, [events, settings]);
@@ -547,7 +547,7 @@ export default function EventsPage() {
                                                 {(() => {
                                                     const category = settings ? classifyEvent(event, settings.classes) : null;
                                                     if (!category) return null;
-                                                    const categoryStr = category.join(" > ");
+                                                    const categoryStr = category.name.join(" > ");
                                                     return (
                                                         <button
                                                             onClick={(e) => {
@@ -557,7 +557,7 @@ export default function EventsPage() {
                                                             className="px-2 py-0.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-full text-[10px] font-medium transition-colors truncate max-w-[150px]"
                                                             title={categoryStr}
                                                         >
-                                                            {category[category.length - 1]}
+                                                            {category.name[category.name.length - 1]}
                                                         </button>
                                                     );
                                                 })()}

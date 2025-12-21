@@ -14,13 +14,25 @@ export function getEventPreview(event: Event): { primary: string; secondary?: st
         };
     }
 
+    // For events with title and description (like manual events)
+    if (data.title && data.description) {
+        return {
+            primary: data.title as string,
+            secondary: data.description as string
+        };
+    }
+
     // For web events - use title first, then url
     if (data.title) {
-        return { primary: data.title };
+        return { primary: data.title as string };
+    }
+
+    if (data.description) {
+        return { primary: data.description as string };
     }
 
     if (data.url) {
-        return { primary: data.url };
+        return { primary: data.url as string };
     }
 
     // For AFK events - show status
@@ -75,4 +87,20 @@ export function calculateEffectiveDuration(events: Event[]): number {
     totalDurationMs += (currentInterval.end - currentInterval.start);
 
     return totalDurationMs / 1000; // Return in seconds
+}
+
+/**
+ * Formats a duration in seconds into a human-readable string (s, m, h m).
+ */
+export function formatDuration(seconds: number): string {
+    if (seconds < 60) {
+        return `${Math.round(seconds)}s`;
+    }
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+
+    if (h > 0) {
+        return m > 0 ? `${h}h ${m}m` : `${h}h`;
+    }
+    return `${m}m`;
 }

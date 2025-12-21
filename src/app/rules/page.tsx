@@ -97,6 +97,14 @@ export default function RulesPage() {
     const [movingRule, setMovingRule] = useState<CategoryClass | null>(null);
     const [moveTargetPath, setMoveTargetPath] = useState("");
 
+    // Category Edit Dialog
+    const [editingCategory, setEditingCategory] = useState<{ path: string[]; color?: string } | null>(null);
+    const [editCategoryName, setEditCategoryName] = useState("");
+    const [editCategoryColor, setEditCategoryColor] = useState("");
+
+    // Category Delete Dialog
+    const [deletingCategory, setDeletingCategory] = useState<{ path: string[] } | null>(null);
+
     useEffect(() => {
         loadSettings();
     }, []);
@@ -213,13 +221,14 @@ export default function RulesPage() {
     // Move subcategory
     const handleMoveOpen = (rule: CategoryClass) => {
         setMovingRule(rule);
-        setMoveTargetPath(rule.name.slice(0, -1).join(" > "));
+        const parentPath = rule.name.slice(0, -1).join(" > ");
+        setMoveTargetPath(parentPath || "root");
     };
 
     const handleMoveSave = () => {
         if (!settings || !movingRule) return;
 
-        const newParentPath = moveTargetPath ? moveTargetPath.split(" > ") : [];
+        const newParentPath = moveTargetPath === "root" ? [] : moveTargetPath.split(" > ");
         const ruleName = movingRule.name[movingRule.name.length - 1];
         const newFullPath = [...newParentPath, ruleName];
 
@@ -231,6 +240,78 @@ export default function RulesPage() {
 
         saveSettings({ ...settings, classes: updatedClasses });
         setMovingRule(null);
+    };
+
+    // Category Rename/Color handlers
+    const handleEditCategoryOpen = (node: CategoryNode) => {
+        // Find existing color. 
+        // 1. Check rules at this node
+        // 2. If not found, check all rules in subtree
+        let existingColor = node.rules.find(r => r.data?.color)?.data?.color;
+
+        if (!existingColor && settings?.classes) {
+            const prefix = node.fullPath;
+            const subtreeRules = settings.classes.filter(cls =>
+                cls.name.length >= prefix.length &&
+                prefix.every((seg, i) => cls.name[i] === seg)
+            );
+            existingColor = subtreeRules.find(r => r.data?.color)?.data?.color;
+        }
+
+        setEditingCategory({ path: node.fullPath, color: existingColor });
+        setEditCategoryName(node.name);
+        setEditCategoryColor(existingColor || "");
+    };
+
+    const handleEditCategorySave = () => {
+        if (!settings || !editingCategory || !editCategoryName.trim()) return;
+
+        const { path } = editingCategory;
+        const newSegmentName = editCategoryName.trim();
+        const depth = path.length - 1;
+
+        const updatedClasses = settings.classes.map(cls => {
+            // Check if this rule is in the affected subtree
+            const matchesPrefix = path.slice(0, depth).every((p, i) => cls.name[i] === p);
+            const matchesSegment = cls.name[depth] === path[depth];
+
+            if (matchesPrefix && matchesSegment) {
+                const newFullPath = [...cls.name];
+                newFullPath[depth] = newSegmentName;
+
+                let newData = { ...cls.data };
+                if (editCategoryColor) {
+                    // Apply color if it's the exact path OR if the rule doesn't have a color yet
+                    // This allows subcategories to keep their specific colors while inheriting from parents
+                    if (cls.name.length === path.length || !cls.data.color) {
+                        newData.color = editCategoryColor;
+                    }
+                } else if (cls.name.length === path.length) {
+                    // Only clear color if it's the exact path being edited
+                    delete newData.color;
+                }
+
+                return { ...cls, name: newFullPath, data: newData };
+            }
+            return cls;
+        });
+
+        saveSettings({ ...settings, classes: updatedClasses });
+        setEditingCategory(null);
+    };
+
+    const handleDeleteCategoryConfirm = () => {
+        if (!settings || !deletingCategory) return;
+
+        const { path } = deletingCategory;
+        const updatedClasses = settings.classes.filter(cls => {
+            // Filter out any rule that has 'path' as a prefix
+            if (cls.name.length < path.length) return true;
+            return !path.every((seg, i) => cls.name[i] === seg);
+        });
+
+        saveSettings({ ...settings, classes: updatedClasses });
+        setDeletingCategory(null);
     };
 
     // Render tree node recursively
@@ -260,6 +341,12 @@ export default function RulesPage() {
                             <div className="w-5" />
                         )}
                         <span className="font-medium">{node.name}</span>
+                        {node.rules.some(r => r.data?.color) && (
+                            <div
+                                className="w-3 h-3 rounded-full border border-border"
+                                style={{ backgroundColor: node.rules.find(r => r.data?.color)?.data?.color }}
+                            />
+                        )}
                         <Badge variant="secondary" className="text-xs">
                             {node.rules.length} rule{node.rules.length !== 1 ? "s" : ""}
                         </Badge>
@@ -268,15 +355,38 @@ export default function RulesPage() {
                                 {countNestedSubcategories(node)} sub{countNestedSubcategories(node) !== 1 ? "s" : ""}
                             </Badge>
                         )}
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 px-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={() => handleAddOpen(node.fullPath)}
-                        >
-                            <Plus className="h-3 w-3 mr-1" />
-                            Add Sub
-                        </Button>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2"
+                                onClick={() => handleEditCategoryOpen(node)}
+                                title="Edit category"
+                            >
+                                <Edit2 className="h-3 w-3 mr-1" />
+                                Edit
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2"
+                                onClick={() => handleAddOpen(node.fullPath)}
+                                title="Add subcategory"
+                            >
+                                <Plus className="h-3 w-3 mr-1" />
+                                Add Sub
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-destructive hover:text-destructive"
+                                onClick={() => setDeletingCategory({ path: node.fullPath })}
+                                title="Delete category and all rules"
+                            >
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Delete
+                            </Button>
+                        </div>
                     </div>
                 )}
 
@@ -487,7 +597,7 @@ export default function RulesPage() {
                                     <SelectValue placeholder="Select parent (or Root for top-level)" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="">Root (Top Level)</SelectItem>
+                                    <SelectItem value="root">Root (Top Level)</SelectItem>
                                     {allPaths
                                         .filter(p => p.join(" > ") !== movingRule?.name.join(" > "))
                                         .map(path => (
@@ -503,9 +613,9 @@ export default function RulesPage() {
                             <div className="p-3 bg-muted rounded-md text-sm">
                                 <span className="text-muted-foreground">New path: </span>
                                 <span className="font-medium">
-                                    {moveTargetPath
-                                        ? `${moveTargetPath} > ${movingRule.name[movingRule.name.length - 1]}`
-                                        : movingRule.name[movingRule.name.length - 1]}
+                                    {moveTargetPath === "root"
+                                        ? movingRule.name[movingRule.name.length - 1]
+                                        : `${moveTargetPath} > ${movingRule.name[movingRule.name.length - 1]}`}
                                 </span>
                             </div>
                         )}
@@ -516,6 +626,69 @@ export default function RulesPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            {/* Edit Category Dialog */}
+            <Dialog open={!!editingCategory} onOpenChange={(open) => !open && setEditingCategory(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Edit Category</DialogTitle>
+                        <DialogDescription>
+                            Rename the category segment and set its color.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label>Category Name</Label>
+                            <Input
+                                value={editCategoryName}
+                                onChange={(e) => setEditCategoryName(e.target.value)}
+                                placeholder="Rename category..."
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Category Color</Label>
+                            <div className="flex items-center gap-3">
+                                <Input
+                                    type="color"
+                                    value={editCategoryColor || "#3b82f6"}
+                                    onChange={(e) => setEditCategoryColor(e.target.value)}
+                                    className="w-12 h-10 p-1 rounded-md cursor-pointer"
+                                />
+                                <Input
+                                    value={editCategoryColor}
+                                    onChange={(e) => setEditCategoryColor(e.target.value)}
+                                    placeholder="#hex color"
+                                    className="font-mono flex-1"
+                                />
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                Color will be used in the dashboard and timeline visualizations.
+                            </p>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditingCategory(null)}>Cancel</Button>
+                        <Button onClick={handleEditCategorySave}>Save Changes</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Category Confirmation */}
+            <AlertDialog open={!!deletingCategory} onOpenChange={(open) => !open && setDeletingCategory(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Category?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will permanently delete the category &quot;{deletingCategory?.path.join(" > ")}&quot; and ALL its rules and subcategories.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDeleteCategoryConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            Delete Everything
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

@@ -27,14 +27,14 @@ export default function EditEventModal({ params }: { params: Params }) {
 
     return (
         <Dialog defaultOpen={true} open={true} onOpenChange={handleOpenChange}>
-            <DialogContent className="sm:max-w-[500px] bg-background">
+            <DialogContent className="sm:max-w-[600px] bg-background max-h-[90vh] flex flex-col">
                 <DialogHeader>
                     <DialogTitle>Edit Event</DialogTitle>
                     <DialogDescription>
                         Modify event details. Note: This creates a new event copy.
                     </DialogDescription>
                 </DialogHeader>
-                <div className="py-4">
+                <div className="flex-1 overflow-hidden py-4">
                     <EditEventForm
                         bucketId={bucketId}
                         eventId={eventId}

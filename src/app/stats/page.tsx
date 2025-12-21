@@ -8,28 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import {
-    format,
-    startOfMonth,
-    endOfMonth,
-    eachDayOfInterval,
-    addMonths,
-    subMonths,
-    startOfDay,
-    endOfDay,
-    startOfWeek,
-    endOfWeek,
-    addWeeks,
-    subWeeks,
-    addDays,
-    subDays,
-    eachHourOfInterval,
-    getHours,
-    isSameDay
-} from "date-fns";
-import { ChevronLeft, ChevronRight, RefreshCw, Download } from "lucide-react";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, startOfDay, endOfDay, startOfWeek, endOfWeek, addWeeks, subWeeks, addDays, subDays, eachHourOfInterval, isSameDay, startOfYear, endOfYear, eachMonthOfInterval, addYears, subYears } from "date-fns";
+import { ChevronLeft, ChevronRight, RefreshCw, Download, ChevronDown, Filter } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-type ViewMode = "day" | "week" | "month";
+type ViewMode = "day" | "week" | "month" | "year";
 
 interface TimeSlot {
     label: string;
@@ -39,8 +25,78 @@ interface TimeSlot {
 
 interface CategoryReport {
     name: string;
+    fullName: string;
     totalDuration: number;
     slotStats: Map<string, number>; // key -> seconds
+    children: CategoryReport[];
+    depth: number;
+}
+
+function ReportRow({
+    cat,
+    timeSlots,
+    viewMode,
+    formatDuration
+}: {
+    cat: CategoryReport,
+    timeSlots: TimeSlot[],
+    viewMode: ViewMode,
+    formatDuration: (s: number) => string
+}) {
+    const [isExpanded, setIsExpanded] = useState(false);
+    const hasChildren = cat.children.length > 0;
+    const isUncategorized = cat.name === "Uncategorized";
+
+    return (
+        <>
+            <TableRow className={cn(
+                isUncategorized ? "text-muted-foreground" : "",
+                hasChildren && "cursor-pointer hover:bg-muted/50 transition-colors"
+            )} onClick={() => hasChildren && setIsExpanded(!isExpanded)}>
+                <TableCell className={cn(
+                    "font-medium sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] py-2",
+                    isUncategorized ? "bg-muted/30" : "bg-background"
+                )}>
+                    <div className="flex items-center gap-1" style={{ paddingLeft: `${cat.depth * 1.25}rem` }}>
+                        {hasChildren ? (
+                            isExpanded ?
+                                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> :
+                                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        ) : (
+                            <div className="w-3.5 h-3.5 shrink-0" />
+                        )}
+                        <span className="truncate">{cat.name}</span>
+                    </div>
+                </TableCell>
+                <TableCell className={cn(
+                    "text-right font-bold py-2 px-4",
+                    isUncategorized ? "bg-muted/30" : "bg-muted/20"
+                )}>
+                    {formatDuration(cat.totalDuration)}
+                </TableCell>
+                {timeSlots.map(slot => {
+                    const val = cat.slotStats.get(slot.key) || 0;
+                    return (
+                        <TableCell key={slot.key} className={cn(
+                            "text-center px-1 py-2",
+                            isUncategorized ? "bg-muted/20" : (val > 0 ? 'bg-primary/5' : '')
+                        )}>
+                            {formatDuration(val)}
+                        </TableCell>
+                    );
+                })}
+            </TableRow>
+            {isExpanded && cat.children.map((child) => (
+                <ReportRow
+                    key={child.fullName}
+                    cat={child}
+                    timeSlots={timeSlots}
+                    viewMode={viewMode}
+                    formatDuration={formatDuration}
+                />
+            ))}
+        </>
+    );
 }
 
 export default function StatsPage() {
@@ -49,6 +105,7 @@ export default function StatsPage() {
     const [currentDate, setCurrentDate] = useState<Date>(new Date());
     const [report, setReport] = useState<CategoryReport[]>([]);
     const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+    const [includeAuto, setIncludeAuto] = useState(false);
 
     const fetchData = async () => {
         setLoading(true);
@@ -74,7 +131,7 @@ export default function StatsPage() {
                     key: format(d, "yyyy-MM-dd"),
                     date: d
                 }));
-            } else {
+            } else if (viewMode === "month") {
                 // Month
                 start = startOfMonth(currentDate);
                 end = endOfMonth(currentDate);
@@ -84,6 +141,16 @@ export default function StatsPage() {
                     key: format(d, "yyyy-MM-dd"),
                     date: d
                 }));
+            } else {
+                // Year
+                start = startOfYear(currentDate);
+                end = endOfYear(currentDate);
+                const months = eachMonthOfInterval({ start, end });
+                slots = months.map(m => ({
+                    label: format(m, "MMM"),
+                    key: format(m, "yyyy-MM"),
+                    date: m
+                }));
             }
 
             setTimeSlots(slots);
@@ -92,62 +159,89 @@ export default function StatsPage() {
             const settings = await api.getSettings();
             const classes = settings?.classes || [];
 
-            // Filter out AFK events
-            const filteredEvents = allEvents.filter(ev => !ev.bucketId?.startsWith("aw-watcher-afk"));
+            // Filter events
+            const filteredEvents = allEvents.filter(ev => {
+                // Always filter out AFK events
+                if (ev.bucketId?.startsWith("aw-watcher-afk")) {
+                    return false;
+                }
+                // When includeAuto is false, only show manual events
+                if (!includeAuto) {
+                    return ev.bucketId === "aw-watcher-manual-nextjs";
+                }
+                return true;
+            });
 
-            // Helper to get top level category name
-            const getTopLevel = (path: string[] | null) => {
-                if (!path || path.length === 0) return "Uncategorized";
-                return path[0];
+            // Internal tree structure for processing
+            type Interval = { start: number; end: number };
+            interface ProcessNode {
+                name: string;
+                fullName: string;
+                children: Map<string, ProcessNode>;
+                slotIntervals: Map<string, Interval[]>;
+                depth: number;
+            }
+
+            const rootNode: ProcessNode = {
+                name: "root",
+                fullName: "root",
+                children: new Map(),
+                slotIntervals: new Map(),
+                depth: -1
             };
 
-            // Helper to get slot key for an event
             const getSlotKey = (timestamp: Date) => {
                 if (viewMode === "day") {
                     return timestamp.getHours().toString();
+                } else if (viewMode === "year") {
+                    return format(timestamp, "yyyy-MM");
                 } else {
                     return format(timestamp, "yyyy-MM-dd");
                 }
             };
 
-            // Group events by category and slot, storing intervals
-            type Interval = { start: number; end: number };
-            const categorySlotIntervals = new Map<string, Map<string, Interval[]>>();
-
+            // Process each event and add it to every node in its category path
             for (const ev of filteredEvents) {
-                const path = classifyEvent(ev, classes);
-                const categoryName = getTopLevel(path);
+                const result = classifyEvent(ev, classes);
+                const path = result?.name || ["Uncategorized"];
                 const evStart = new Date(ev.timestamp).getTime();
                 const evEnd = evStart + ev.duration * 1000;
-
-                if (!categorySlotIntervals.has(categoryName)) {
-                    categorySlotIntervals.set(categoryName, new Map());
-                }
-                const slotMap = categorySlotIntervals.get(categoryName)!;
-
-                // An event can span multiple slots, but for simplicity we assign to start slot
                 const slotKey = getSlotKey(new Date(ev.timestamp));
 
-                if (!slotMap.has(slotKey)) {
-                    slotMap.set(slotKey, []);
+                let currentNode = rootNode;
+                let currentPath = "";
+
+                for (let i = 0; i < path.length; i++) {
+                    const segment = path[i];
+                    currentPath = currentPath ? `${currentPath} > ${segment}` : segment;
+
+                    if (!currentNode.children.has(segment)) {
+                        currentNode.children.set(segment, {
+                            name: segment,
+                            fullName: currentPath,
+                            children: new Map(),
+                            slotIntervals: new Map(),
+                            depth: i
+                        });
+                    }
+                    currentNode = currentNode.children.get(segment)!;
+
+                    if (!currentNode.slotIntervals.has(slotKey)) {
+                        currentNode.slotIntervals.set(slotKey, []);
+                    }
+                    currentNode.slotIntervals.get(slotKey)!.push({ start: evStart, end: evEnd });
                 }
-                slotMap.get(slotKey)!.push({ start: evStart, end: evEnd });
             }
 
-            // Merge intervals with 5-minute gap tolerance
-            const GAP_TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes
-
+            // Merge intervals helper
+            const GAP_TOLERANCE_MS = 5 * 60 * 1000;
             const mergeIntervals = (intervals: Interval[]): Interval[] => {
                 if (intervals.length === 0) return [];
-                // Sort by start time
-                intervals.sort((a, b) => a.start - b.start);
-                const merged: Interval[] = [{ ...intervals[0] }];
-
-                for (let i = 1; i < intervals.length; i++) {
+                const sorted = [...intervals].sort((a, b) => a.start - b.start);
+                const merged: Interval[] = [{ ...sorted[0] }];
+                for (let i = 1; i < sorted.length; i++) {
                     const last = merged[merged.length - 1];
-                    const current = intervals[i];
-
-                    // If current starts within gap tolerance of last's end, merge
+                    const current = sorted[i];
                     if (current.start <= last.end + GAP_TOLERANCE_MS) {
                         last.end = Math.max(last.end, current.end);
                     } else {
@@ -157,33 +251,38 @@ export default function StatsPage() {
                 return merged;
             };
 
-            // Calculate durations from merged intervals
-            const categoryMap = new Map<string, CategoryReport>();
+            // Recursive function to convert ProcessNode to CategoryReport
+            const buildReport = (node: ProcessNode): CategoryReport[] => {
+                const reports: CategoryReport[] = [];
 
-            for (const [categoryName, slotMap] of categorySlotIntervals) {
-                const catReport: CategoryReport = {
-                    name: categoryName,
-                    totalDuration: 0,
-                    slotStats: new Map()
-                };
+                for (const childNode of node.children.values()) {
+                    const catReport: CategoryReport = {
+                        name: childNode.name,
+                        fullName: childNode.fullName,
+                        totalDuration: 0,
+                        slotStats: new Map(),
+                        children: buildReport(childNode),
+                        depth: childNode.depth
+                    };
 
-                for (const [slotKey, intervals] of slotMap) {
-                    const merged = mergeIntervals(intervals);
-                    const slotDuration = merged.reduce((sum, iv) => sum + (iv.end - iv.start), 0) / 1000; // seconds
-                    catReport.slotStats.set(slotKey, slotDuration);
-                    catReport.totalDuration += slotDuration;
+                    for (const [slotKey, intervals] of childNode.slotIntervals) {
+                        const merged = mergeIntervals(intervals);
+                        const duration = merged.reduce((sum, iv) => sum + (iv.end - iv.start), 0) / 1000;
+                        catReport.slotStats.set(slotKey, duration);
+                        catReport.totalDuration += duration;
+                    }
+
+                    reports.push(catReport);
                 }
 
-                categoryMap.set(categoryName, catReport);
-            }
+                return reports.sort((a, b) => {
+                    if (a.name === "Uncategorized") return 1;
+                    if (b.name === "Uncategorized") return -1;
+                    return b.totalDuration - a.totalDuration;
+                });
+            };
 
-            // Convert to array and sort by total duration, keeping Uncategorized at the bottom
-            const result = Array.from(categoryMap.values()).sort((a, b) => {
-                if (a.name === "Uncategorized") return 1;
-                if (b.name === "Uncategorized") return -1;
-                return b.totalDuration - a.totalDuration;
-            });
-            setReport(result);
+            setReport(buildReport(rootNode));
 
         } catch (e) {
             console.error(e);
@@ -194,23 +293,25 @@ export default function StatsPage() {
 
     useEffect(() => {
         fetchData();
-    }, [currentDate, viewMode]);
+    }, [currentDate, viewMode, includeAuto]);
 
     const handlePrevious = () => {
         if (viewMode === "day") setCurrentDate(d => subDays(d, 1));
         else if (viewMode === "week") setCurrentDate(d => subWeeks(d, 1));
-        else setCurrentDate(d => subMonths(d, 1));
+        else if (viewMode === "month") setCurrentDate(d => subMonths(d, 1));
+        else setCurrentDate(d => subYears(d, 1));
     };
 
     const handleNext = () => {
         if (viewMode === "day") setCurrentDate(d => addDays(d, 1));
         else if (viewMode === "week") setCurrentDate(d => addWeeks(d, 1));
-        else setCurrentDate(d => addMonths(d, 1));
+        else if (viewMode === "month") setCurrentDate(d => addMonths(d, 1));
+        else setCurrentDate(d => addYears(d, 1));
     };
 
     const handleViewModeChange = (val: ViewMode) => {
         setViewMode(val);
-        setCurrentDate(new Date()); // Reset to today when switching modes
+        setCurrentDate(new Date());
     };
 
     const formatDuration = (seconds: number) => {
@@ -226,26 +327,35 @@ export default function StatsPage() {
             const end = endOfWeek(currentDate, { weekStartsOn: 1 });
             return `${format(start, "MMM d")} - ${format(end, "MMM d, yyyy")}`;
         }
-        return format(currentDate, "MMMM yyyy");
+        if (viewMode === "month") return format(currentDate, "MMMM yyyy");
+        return format(currentDate, "yyyy");
     };
 
     const downloadCSV = () => {
-        // Headers: Category, Total, [Slot 1, Slot 2, ...]
-        const headers = ["Category", "Total (h)", ...timeSlots.map(s => s.date && viewMode !== "day" ? format(s.date, "yyyy-MM-dd") : s.label)];
+        const headers = ["Category", "Depth", "Total (h)", ...timeSlots.map(s => s.date && viewMode !== "day" ? format(s.date, "yyyy-MM-dd") : s.label)];
 
-        // Rows
-        const rows = report.map(cat => {
-            const row = [
-                `"${cat.name}"`, // Quote name to handle commas
-                (cat.totalDuration / 3600).toFixed(2),
-                ...timeSlots.map(s => {
-                    const val = cat.slotStats.get(s.key) || 0;
-                    return (val / 3600).toFixed(2);
-                })
-            ];
-            return row.join(",");
-        });
+        // Helper to flatten the tree for CSV
+        const flattenReport = (reports: CategoryReport[]): any[][] => {
+            let rows: any[][] = [];
+            for (const cat of reports) {
+                const row = [
+                    `"${cat.fullName}"`,
+                    cat.depth,
+                    (cat.totalDuration / 3600).toFixed(2),
+                    ...timeSlots.map(s => {
+                        const val = cat.slotStats.get(s.key) || 0;
+                        return (val / 3600).toFixed(2);
+                    })
+                ];
+                rows.push(row);
+                if (cat.children.length > 0) {
+                    rows = [...rows, ...flattenReport(cat.children)];
+                }
+            }
+            return rows;
+        };
 
+        const rows = flattenReport(report).map(r => r.join(","));
         const csvContent = [headers.join(","), ...rows].join("\n");
         const blob = new Blob([csvContent], { type: "application/octet-stream" });
         const url = URL.createObjectURL(blob);
@@ -272,6 +382,7 @@ export default function StatsPage() {
                             <SelectItem value="day">Today</SelectItem>
                             <SelectItem value="week">This Week</SelectItem>
                             <SelectItem value="month">This Month</SelectItem>
+                            <SelectItem value="year">This Year</SelectItem>
                         </SelectContent>
                     </Select>
 
@@ -293,6 +404,29 @@ export default function StatsPage() {
                     <Button variant="outline" size="icon" onClick={fetchData} className="ml-2">
                         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                     </Button>
+
+                    <div className="flex items-center space-x-2 bg-muted/40 px-3 py-1.5 rounded-full border border-border/40 ml-2">
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <div className="flex items-center space-x-2">
+                                        <Checkbox
+                                            id="include-auto"
+                                            checked={includeAuto}
+                                            onChange={(e) => setIncludeAuto((e.target as HTMLInputElement).checked)}
+                                        />
+                                        <Label htmlFor="include-auto" className="text-xs font-semibold cursor-pointer whitespace-nowrap flex items-center gap-1.5">
+                                            <Filter className="h-3 w-3" />
+                                            Include Auto
+                                        </Label>
+                                    </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>Include automatically generated categories from watchers</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                    </div>
                 </div>
             </div>
 
@@ -303,51 +437,45 @@ export default function StatsPage() {
                         {viewMode === "day" && "Hourly breakdown of activity."}
                         {viewMode === "week" && "Daily breakdown of activity for the week."}
                         {viewMode === "month" && "Daily breakdown of activity for the month."}
+                        {viewMode === "year" && "Monthly breakdown of activity for the year."}
                     </CardDescription>
                 </CardHeader>
-                <CardContent className="overflow-x-auto">
+                <CardContent className="overflow-x-auto p-0 border-t">
                     {loading ? (
-                        <div className="p-8 text-center">Loading report...</div>
+                        <div className="p-8 text-center text-muted-foreground animate-pulse">Loading report...</div>
                     ) : (
                         <Table>
                             <TableHeader>
-                                <TableRow>
-                                    <TableHead className="w-[150px] sticky left-0 bg-background z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Category</TableHead>
-                                    <TableHead className="text-right font-bold bg-muted/20">Total</TableHead>
+                                <TableRow className="hover:bg-transparent">
+                                    <TableHead className="w-[200px] sticky left-0 bg-background z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Category</TableHead>
+                                    <TableHead className="text-right font-bold bg-muted/20 w-[80px] px-4">Total</TableHead>
                                     {timeSlots.map(slot => (
-                                        <TableHead key={slot.key} className="text-center min-w-[40px] px-1">
-                                            <div className="text-xs whitespace-nowrap">{slot.label}</div>
-                                            {viewMode === "month" && slot.date && (
-                                                <div className="text-[10px] text-muted-foreground">{format(slot.date, "EE")}</div>
+                                        <TableHead key={slot.key} className="text-center min-w-[60px] px-1">
+                                            <div className="text-xs font-semibold whitespace-nowrap">{slot.label}</div>
+                                            {(viewMode === "month" || viewMode === "week") && slot.date && (
+                                                <div className="text-[10px] text-muted-foreground uppercase font-medium">{format(slot.date, "EEE")}</div>
                                             )}
                                         </TableHead>
                                     ))}
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {report.map((cat) => {
-                                    const isUncategorized = cat.name === "Uncategorized";
-                                    return (
-                                        <TableRow key={cat.name} className={isUncategorized ? "text-muted-foreground" : ""}>
-                                            <TableCell className={`font-medium sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] ${isUncategorized ? "bg-muted/30" : "bg-background"}`}>{cat.name}</TableCell>
-                                            <TableCell className={`text-right font-bold ${isUncategorized ? "bg-muted/30" : "bg-muted/20"}`}>
-                                                {formatDuration(cat.totalDuration)}
-                                            </TableCell>
-                                            {timeSlots.map(slot => {
-                                                const val = cat.slotStats.get(slot.key) || 0;
-                                                return (
-                                                    <TableCell key={slot.key} className={`text-center px-1 ${isUncategorized ? "bg-muted/20" : (val > 0 ? 'bg-primary/5' : '')}`}>
-                                                        {formatDuration(val)}
-                                                    </TableCell>
-                                                );
-                                            })}
-                                        </TableRow>
-                                    );
-                                })}
+                                {report.map((cat) => (
+                                    <ReportRow
+                                        key={cat.fullName}
+                                        cat={cat}
+                                        timeSlots={timeSlots}
+                                        viewMode={viewMode}
+                                        formatDuration={formatDuration}
+                                    />
+                                ))}
                                 {report.length === 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={timeSlots.length + 2} className="text-center py-8 text-muted-foreground">
-                                            No activity data found for this period.
+                                        <TableCell colSpan={timeSlots.length + 2} className="text-center py-20 text-muted-foreground">
+                                            <div className="flex flex-col items-center gap-2">
+                                                <p className="text-lg font-medium">No activity data found</p>
+                                                <p className="text-sm">Try selecting a different time period or check your watchers.</p>
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 )}

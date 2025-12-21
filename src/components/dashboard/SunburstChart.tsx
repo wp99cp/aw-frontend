@@ -73,7 +73,7 @@ export function SunburstChart({ data, onCategorySelect }: { data: SunburstNode, 
                 value="value"
                 cornerRadius={2}
                 borderColor={{ theme: 'background' }}
-                colors={{ scheme: 'nivo' }}
+                colors={(datum) => datum.data.color || '#8884d8'}
                 childColor={{
                     from: 'color',
                     modifiers: [

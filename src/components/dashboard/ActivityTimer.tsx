@@ -27,6 +27,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Event } from "@/lib/types";
 import { EventModal } from "@/components/events/EventModal";
+import { formatDuration } from "@/lib/event-utils";
 
 const MANUAL_BUCKET_ID = "aw-watcher-manual-nextjs";
 
@@ -71,7 +72,7 @@ export function ActivityTimer({ onActivityLogged }: { onActivityLogged?: () => v
             }
 
             const events = await api.getEvents(MANUAL_BUCKET_ID, { limit: 3 });
-            setRecentEvents(events);
+            setRecentEvents(events.map(e => ({ ...e, bucketId: MANUAL_BUCKET_ID })));
         } catch (e) {
             console.error("Failed to load recent events", e);
         }
@@ -191,7 +192,7 @@ export function ActivityTimer({ onActivityLogged }: { onActivityLogged?: () => v
                 data: {
                     app: "Manual Activity",
                     title: title,
-                    category: category,
+                    category: category ? category.split(" > ") : undefined,
                 }
             });
 
@@ -238,7 +239,8 @@ export function ActivityTimer({ onActivityLogged }: { onActivityLogged?: () => v
         if (!eventToDelete || !eventToDelete.id) return;
 
         try {
-            await api.deleteEvent(MANUAL_BUCKET_ID, eventToDelete.id);
+            const bucketId = eventToDelete.bucketId || MANUAL_BUCKET_ID;
+            await api.deleteEvent(bucketId, eventToDelete.id);
             toast.success("Activity deleted");
             loadRecentEvents();
             if (onActivityLogged) onActivityLogged();
@@ -343,7 +345,7 @@ export function ActivityTimer({ onActivityLogged }: { onActivityLogged?: () => v
                                         )}
                                     </div>
                                     <div className="flex items-center gap-1 text-muted-foreground">
-                                        <span>{formatTime(e.duration)}</span>
+                                        <span>{formatDuration(e.duration)}</span>
                                         <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => openEditDialog(e)} title="Edit">
                                             <Edit2 className="h-3.5 w-3.5" />
                                         </Button>

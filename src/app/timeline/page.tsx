@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useTransition } from "react";
 import { format, addDays, subDays, startOfDay, endOfDay } from "date-fns";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2, Filter } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Filter, Minus, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -11,20 +11,129 @@ import { fetchAllEvents } from "@/lib/data";
 import { api } from "@/lib/api";
 import { Event } from "@/lib/types";
 import { TimelineView } from "@/components/timeline/TimelineView";
+import { TimelineSkeleton } from "@/components/timeline/TimelineSkeleton";
 import { classifyEvent, Settings } from "@/lib/categories";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { calculateSessions, calculateZoomRange, ZoomRange } from "@/lib/timeline";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
+interface CategoryNode {
+    name: string;
+    fullPath: string;
+    children: CategoryNode[];
+}
+
+function buildCategoryTree(categories: string[]): CategoryNode[] {
+    const root: CategoryNode[] = [];
+
+    categories.forEach(cat => {
+        const parts = cat.split(" > ");
+        let currentLevel = root;
+        let pathSoFar = "";
+
+        parts.forEach((part, idx) => {
+            pathSoFar = idx === 0 ? part : `${pathSoFar} > ${part} `;
+            let existing = currentLevel.find(n => n.name === part);
+
+            if (!existing) {
+                existing = { name: part, fullPath: pathSoFar, children: [] };
+                currentLevel.push(existing);
+            }
+            currentLevel = existing.children;
+        });
+    });
+
+    return root;
+}
+
+function getAllDescendants(node: CategoryNode): string[] {
+    const result: string[] = [node.fullPath];
+    node.children.forEach(child => {
+        result.push(...getAllDescendants(child));
+    });
+    return result;
+}
+
+function getAllPaths(nodes: CategoryNode[]): string[] {
+    const result: string[] = [];
+    nodes.forEach(node => {
+        result.push(...getAllDescendants(node));
+    });
+    return result;
+}
+
+type CheckState = "checked" | "unchecked" | "indeterminate";
+
+function getCheckState(node: CategoryNode, selectedCategories: string[]): CheckState {
+    const allDescendants = getAllDescendants(node);
+    const selectedCount = allDescendants.filter(d => selectedCategories.includes(d)).length;
+
+    if (selectedCount === 0) return "unchecked";
+    if (selectedCount === allDescendants.length) return "checked";
+    return "indeterminate";
+}
+
+interface CategoryItemProps {
+    node: CategoryNode;
+    depth: number;
+    selectedCategories: string[];
+    onToggle: (node: CategoryNode) => void;
+}
+
+function CategoryItem({ node, depth, selectedCategories, onToggle }: CategoryItemProps) {
+    const state = getCheckState(node, selectedCategories);
+    const hasChildren = node.children.length > 0;
+
+    return (
+        <>
+            <button
+                onClick={() => onToggle(node)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left"
+                style={{ paddingLeft: `${8 + depth * 16}px` }}
+            >
+                <div className={cn(
+                    "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border",
+                    state === "checked" && "bg-primary border-primary text-primary-foreground",
+                    state === "indeterminate" && "bg-primary/50 border-primary text-primary-foreground",
+                    state === "unchecked" && "border-muted-foreground/50"
+                )}>
+                    {state === "checked" && <Check className="h-3 w-3" />}
+                    {state === "indeterminate" && <Minus className="h-3 w-3" />}
+                </div>
+                <span className={cn(
+                    depth === 0 && "font-medium",
+                    hasChildren && "text-foreground"
+                )}>
+                    {node.name}
+                </span>
+            </button>
+            {node.children.map(child => (
+                <CategoryItem
+                    key={child.fullPath}
+                    node={child}
+                    depth={depth + 1}
+                    selectedCategories={selectedCategories}
+                    onToggle={onToggle}
+                />
+            ))}
+        </>
+    );
+}
 
 export default function TimelinePage() {
     const [date, setDate] = useState<Date>(new Date());
     const [loading, setLoading] = useState(true);
     const [autoEvents, setAutoEvents] = useState<Event[]>([]);
     const [manualEvents, setManualEvents] = useState<Event[]>([]);
+    const [initialZoomRange, setInitialZoomRange] = useState<ZoomRange>({ start: 0, end: 1440 });
 
     // Filtering State
     const [settings, setSettings] = useState<Settings | null>(null);
     const [availableCategories, setAvailableCategories] = useState<string[]>([]);
     const [selectedCategories, setSelectedCategories] = useState<string[]>([]); // Empty = All
+    const [deferredCategories, setDeferredCategories] = useState<string[]>([]); // Deferred for expensive filter
     const [isFilterOpen, setIsFilterOpen] = useState(false);
+    const [isFiltering, startFilterTransition] = useTransition();
+    const [isBucketsExpanded, setIsBucketsExpanded] = useState(false);
 
     useEffect(() => {
         const loadEventsAndSettings = async () => {
@@ -52,7 +161,7 @@ export default function TimelinePage() {
                     // Classify to find category
                     const classification = classifyEvent(e, currentSettings?.classes || []);
                     if (classification) {
-                        const categoryString = classification.join(" > ");
+                        const categoryString = classification.name.join(" > ");
                         foundCategories.add(categoryString);
                     } else {
                         foundCategories.add("Uncategorized");
@@ -69,6 +178,11 @@ export default function TimelinePage() {
 
                 setAutoEvents(auto);
                 setManualEvents(manual);
+
+                // Calculate optimal zoom immediately
+                const sessions = calculateSessions(auto, manual);
+                const zoom = calculateZoomRange(sessions);
+                setInitialZoomRange(zoom);
 
                 // Update available categories 
                 const sortedCats = Array.from(foundCategories).sort();
@@ -89,31 +203,61 @@ export default function TimelinePage() {
         setDate(new Date(date));
     };
 
-    // Filter Logic
+    // Build category tree
+    const categoryTree = useMemo(() => buildCategoryTree(availableCategories), [availableCategories]);
+
+    // Toggle category with tree logic
+    const toggleCategory = useCallback((node: CategoryNode) => {
+        const state = getCheckState(node, selectedCategories);
+        const allDescendants = getAllDescendants(node);
+
+        let newCategories: string[];
+        if (state === "checked") {
+            // Uncheck all descendants
+            newCategories = selectedCategories.filter(c => !allDescendants.includes(c));
+        } else {
+            // Check all descendants
+            const newSet = new Set(selectedCategories);
+            allDescendants.forEach(d => newSet.add(d));
+            newCategories = Array.from(newSet);
+        }
+
+        setSelectedCategories(newCategories);
+        startFilterTransition(() => {
+            setDeferredCategories(newCategories);
+        });
+    }, [selectedCategories]);
+
+    // Clear all categories handler
+    const clearCategories = useCallback(() => {
+        setSelectedCategories([]);
+        startFilterTransition(() => {
+            setDeferredCategories([]);
+        });
+    }, []);
+
+    // Filter Logic - uses deferred categories to avoid blocking UI
     const filteredData = useMemo(() => {
-        if (selectedCategories.length === 0) {
+        if (deferredCategories.length === 0) {
             return { auto: autoEvents, manual: manualEvents };
         }
 
         const filterFn = (e: Event) => {
             const cls = classifyEvent(e, settings?.classes || []);
-            const cat = cls ? cls.join(" > ") : "Uncategorized";
-            return selectedCategories.includes(cat);
+            const cat = cls ? cls.name.join(" > ") : "Uncategorized";
+
+            // Check for exact match OR if event's category starts with any selected category
+            // e.g., if "Work" is selected, "Work > Programming" should also match
+            return deferredCategories.some(selected =>
+                cat === selected || cat.startsWith(selected + " > ")
+            );
         };
 
         return {
             auto: autoEvents.filter(filterFn),
             manual: manualEvents.filter(filterFn)
         };
-    }, [autoEvents, manualEvents, selectedCategories, settings]);
-
-    const toggleCategory = (cat: string) => {
-        if (selectedCategories.includes(cat)) {
-            setSelectedCategories(prev => prev.filter(c => c !== cat));
-        } else {
-            setSelectedCategories(prev => [...prev, cat]);
-        }
-    };
+    }, [autoEvents, manualEvents, deferredCategories, settings]);
 
     return (
         <div className="container mx-auto py-6 space-y-6">
@@ -166,48 +310,42 @@ export default function TimelinePage() {
                                 )}
                             </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-[300px] p-0" align="end">
-                            <Command>
-                                <CommandInput placeholder="Search categories..." />
-                                <CommandList>
-                                    <CommandEmpty>No category found.</CommandEmpty>
-                                    <CommandGroup>
-                                        <CommandItem onSelect={() => setSelectedCategories([])}>
-                                            <div className={cn(
-                                                "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
-                                                selectedCategories.length === 0 ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible"
-                                            )}>
-                                                <Filter className="h-3 w-3" />
-                                            </div>
-                                            <span>Show All</span>
-                                        </CommandItem>
-                                        {availableCategories.map(cat => (
-                                            <CommandItem key={cat} onSelect={() => toggleCategory(cat)}>
-                                                <div className={cn(
-                                                    "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
-                                                    selectedCategories.includes(cat) ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible"
-                                                )}>
-                                                    <svg
-                                                        xmlns="http://www.w3.org/2000/svg"
-                                                        width="24"
-                                                        height="24"
-                                                        viewBox="0 0 24 24"
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        strokeWidth="2"
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
-                                                        className="h-3 w-3"
-                                                    >
-                                                        <polyline points="20 6 9 17 4 12" />
-                                                    </svg>
-                                                </div>
-                                                <span>{cat}</span>
-                                            </CommandItem>
-                                        ))}
-                                    </CommandGroup>
-                                </CommandList>
-                            </Command>
+                        <PopoverContent className="w-[360px] p-0" align="end">
+                            <div className="p-2 border-b">
+                                <span className="text-sm font-medium">Filter by Category</span>
+                            </div>
+                            <ScrollArea className="h-[300px]">
+                                <div className="p-2 space-y-0.5">
+                                    <button
+                                        onClick={clearCategories}
+                                        className={cn(
+                                            "w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left font-medium"
+                                        )}
+                                    >
+                                        <div className={cn(
+                                            "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border",
+                                            selectedCategories.length === 0
+                                                ? "bg-primary border-primary text-primary-foreground"
+                                                : "border-muted-foreground/50"
+                                        )}>
+                                            {selectedCategories.length === 0 && <Check className="h-3 w-3" />}
+                                        </div>
+                                        <span>Show All</span>
+                                    </button>
+
+                                    <div className="h-px bg-border my-2" />
+
+                                    {categoryTree.map(node => (
+                                        <CategoryItem
+                                            key={node.fullPath}
+                                            node={node}
+                                            depth={0}
+                                            selectedCategories={selectedCategories}
+                                            onToggle={toggleCategory}
+                                        />
+                                    ))}
+                                </div>
+                            </ScrollArea>
                         </PopoverContent>
                     </Popover>
 
@@ -217,16 +355,18 @@ export default function TimelinePage() {
                 </div>
             </div>
 
-            {loading ? (
-                <div className="flex h-[400px] items-center justify-center">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                </div>
+            {loading || isFiltering ? (
+                <TimelineSkeleton />
             ) : (
                 <TimelineView
                     date={date}
                     autoEvents={filteredData.auto}
                     manualEvents={filteredData.manual}
                     onEventCreated={handleRefresh}
+                    initialZoomRange={initialZoomRange}
+                    classes={settings?.classes}
+                    isExpanded={isBucketsExpanded}
+                    onExpandedChange={setIsBucketsExpanded}
                 />
             )}
         </div>

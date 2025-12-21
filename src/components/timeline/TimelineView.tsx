@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useTransition } from "react";
 import { Event } from "@/lib/types";
 import { cn, getHumanReadableBucketName } from "@/lib/utils";
 import { TimeAxis } from "./TimeAxis";
@@ -9,75 +9,51 @@ import { ManualLane } from "./ManualLane";
 import { EventForm } from "@/components/events/EventForm";
 import { EventModal } from "@/components/events/EventModal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Session, ZoomRange, calculateSessions } from "@/lib/timeline";
+import { CategoryClass } from "@/lib/categories";
+import { Loader2 } from "lucide-react";
 
 interface TimelineViewProps {
     date: Date;
     autoEvents: Event[];
     manualEvents: Event[];
     onEventCreated: () => void;
+    initialZoomRange?: ZoomRange;
+    classes?: CategoryClass[];
+    isExpanded?: boolean;
+    onExpandedChange?: (expanded: boolean) => void;
 }
 
 export interface DraftSelection {
     start: number; // minutes
     end: number;   // minutes
-    suggestedApp?: string;
+    suggestedCategory?: string;
 }
 
-export type ZoomRange = { start: number; end: number };
+export type { ZoomRange };
 
-export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }: TimelineViewProps) {
+export function TimelineView({ date, autoEvents, manualEvents, onEventCreated, initialZoomRange, classes = [], isExpanded: externalIsExpanded, onExpandedChange }: TimelineViewProps) {
     const [draft, setDraft] = useState<DraftSelection | null>(null);
-    const [zoomRange, setZoomRange] = useState<ZoomRange>({ start: 0, end: 1440 });
+    const [zoomRange, setZoomRange] = useState<ZoomRange>(initialZoomRange || { start: 0, end: 1440 });
     const [guideLines, setGuideLines] = useState<number[]>([]);
     const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
-    // Track if we have set the initial zoom for the current data
-    const [hasInitializedZoom, setHasInitializedZoom] = useState(false);
-    // Track if buckets are expanded
-    const [isExpanded, setIsExpanded] = useState(false);
+    // Track if buckets are expanded - use transition for smoother UX
+    // Use external state if provided, otherwise use internal state
+    const [internalIsExpanded, setInternalIsExpanded] = useState(false);
+    const isExpanded = externalIsExpanded !== undefined ? externalIsExpanded : internalIsExpanded;
+    const setIsExpanded = (value: boolean) => {
+        if (onExpandedChange) {
+            onExpandedChange(value);
+        } else {
+            setInternalIsExpanded(value);
+        }
+    };
+    const [displayExpanded, setDisplayExpanded] = useState(isExpanded);
+    const [isPending, startTransition] = useTransition();
 
     // Derived Sessions (Boot/Shutdowns)
-    const sessions = (() => {
-        if (autoEvents.length === 0 && manualEvents.length === 0) return [];
+    const sessions = React.useMemo(() => calculateSessions(autoEvents, manualEvents), [autoEvents, manualEvents]);
 
-        // 1. Flatten to intervals
-        const intervals: { start: number, end: number }[] = [];
-        const process = (e: Event) => {
-            const d = new Date(e.timestamp);
-            const s = d.getHours() * 60 + d.getMinutes();
-            const end = s + (e.duration / 60);
-            intervals.push({ start: s, end });
-        };
-        autoEvents.forEach(process);
-        manualEvents.forEach(process);
-
-        if (intervals.length === 0) return [];
-
-        // 2. Sort
-        intervals.sort((a, b) => a.start - b.start);
-
-        // 3. Merge & Split by Gap
-        const result: { start: number, end: number }[] = [];
-        let current = intervals[0];
-
-        for (let i = 1; i < intervals.length; i++) {
-            const next = intervals[i];
-            const gap = next.start - current.end;
-
-            if (gap > 30) {
-                // Gap > 30 mins, push current and start new
-                result.push(current);
-                current = next;
-            } else {
-                // Merge (overlap or small gap)
-                // We maximize the end time.
-                current.end = Math.max(current.end, next.end);
-            }
-        }
-        result.push(current);
-        return result;
-    })();
-
-    // Extract snap points (start and end of sessions)
     // Extract snap points (start and end of sessions), rounded to 5 minutes
     const snapPoints = sessions.flatMap(s => [
         Math.round(s.start / 5) * 5,
@@ -86,29 +62,12 @@ export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }:
 
     const isToday = new Date().toDateString() === date.toDateString();
 
-    // Initial Zoom Effect (Use first session start and last session end)
+    // Reset zoom when initialZoomRange changes (date change in parent)
     useEffect(() => {
-        if (sessions.length > 0 && !hasInitializedZoom) {
-            const first = sessions[0].start;
-            const last = sessions[sessions.length - 1].end;
-            const padding = 60; // 1 hour padding
-            const zStart = Math.max(0, first - padding);
-            const zEnd = Math.min(1440, last + padding);
-
-            // Wrap in setTimeout to avoid synchronous setState warning
-            setTimeout(() => {
-                setZoomRange({ start: zStart, end: zEnd });
-                setHasInitializedZoom(true);
-            }, 0);
+        if (initialZoomRange) {
+            setZoomRange(initialZoomRange);
         }
-    }, [sessions, hasInitializedZoom]);
-
-    // Reset initialization when date changes (proxied by events changing substantially? or explicit date prop)
-    useEffect(() => {
-        setTimeout(() => {
-            setHasInitializedZoom(false);
-        }, 0);
-    }, [date]);
+    }, [initialZoomRange]);
 
     const handleEventCreated = () => {
         setDraft(null);
@@ -135,7 +94,7 @@ export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }:
     };
 
     const groupedEvents = React.useMemo(() => {
-        if (!isExpanded) return {};
+        if (!displayExpanded) return {};
 
         const groups = autoEvents.reduce((acc, event) => {
             const bucket = event.bucketId || "Unknown Bucket";
@@ -149,7 +108,7 @@ export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }:
             acc[key] = groups[key];
             return acc;
         }, {} as Record<string, Event[]>);
-    }, [autoEvents, isExpanded]);
+    }, [autoEvents, displayExpanded]);
 
     return (
         <div className="space-y-6">
@@ -176,21 +135,24 @@ export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }:
                             {sessions.map((session, idx) => {
                                 const isLast = idx === sessions.length - 1;
                                 const showEnd = !(isToday && isLast);
+                                // Round to 5-minute intervals for alignment
+                                const startRounded = Math.round(session.start / 5) * 5;
+                                const endRounded = Math.round(session.end / 5) * 5;
 
                                 return (
                                     <React.Fragment key={idx}>
                                         {/* Start Line */}
-                                        {session.start >= zoomRange.start && session.start <= zoomRange.end && (
+                                        {startRounded >= zoomRange.start && startRounded <= zoomRange.end && (
                                             <div
-                                                className="absolute top-0 bottom-0 w-px bg-red-600 z-0 pointer-events-none opacity-50"
-                                                style={getGuideStyle(session.start)}
+                                                className="absolute top-0 bottom-0 w-[2px] bg-red-600 z-0 pointer-events-none opacity-50"
+                                                style={getGuideStyle(startRounded)}
                                             />
                                         )}
                                         {/* End Line */}
-                                        {showEnd && session.end >= zoomRange.start && session.end <= zoomRange.end && (
+                                        {showEnd && endRounded >= zoomRange.start && endRounded <= zoomRange.end && (
                                             <div
-                                                className="absolute top-0 bottom-0 w-px bg-red-600 z-0 pointer-events-none opacity-50"
-                                                style={getGuideStyle(session.end)}
+                                                className="absolute top-0 bottom-0 w-[2px] bg-red-600 z-0 pointer-events-none opacity-50"
+                                                style={getGuideStyle(endRounded)}
                                             />
                                         )}
                                     </React.Fragment>
@@ -224,6 +186,7 @@ export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }:
                                     onGuideChange={setGuideLines}
                                     onEventClick={setSelectedEvent}
                                     snapPoints={snapPoints}
+                                    classes={classes}
                                 />
                             </div>
 
@@ -237,14 +200,41 @@ export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }:
                                         Activity (Drag to Zoom)
                                     </h4>
                                     <button
-                                        onClick={() => setIsExpanded(!isExpanded)}
+                                        onClick={() => {
+                                            const newValue = !isExpanded;
+                                            setIsExpanded(newValue);
+                                            // Use transition to defer the expensive render
+                                            startTransition(() => {
+                                                setDisplayExpanded(newValue);
+                                            });
+                                        }}
                                         className="text-xs flex items-center gap-1 text-primary hover:text-primary/80 transition-colors"
+                                        disabled={isPending}
                                     >
+                                        {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
                                         {isExpanded ? "Collapse Buckets" : "Expand Buckets"}
                                     </button>
                                 </div>
 
-                                {isExpanded ? (
+                                {/* Show loading skeleton when transition is pending */}
+                                {isPending && isExpanded && (
+                                    <div className="space-y-2 animate-pulse">
+                                        {[1, 2, 3].map((i) => (
+                                            <div key={i} className="relative">
+                                                <div className="h-3 w-24 bg-muted rounded mb-1" />
+                                                <div className="h-16 w-full bg-muted/30 rounded-md border" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {isPending && !isExpanded && (
+                                    <div className="animate-pulse">
+                                        <div className="h-16 w-full bg-muted/30 rounded-md border" />
+                                    </div>
+                                )}
+
+                                {/* Actual content - only render when not pending */}
+                                {!isPending && displayExpanded ? (
                                     <div className="space-y-2">
                                         {Object.entries(groupedEvents).map(([bucketId, events]) => (
                                             <div key={bucketId} className="relative">
@@ -255,17 +245,19 @@ export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }:
                                                     events={events}
                                                     zoomRange={zoomRange}
                                                     onZoomChange={setZoomRange}
+                                                    classes={classes}
                                                 />
                                             </div>
                                         ))}
                                     </div>
-                                ) : (
+                                ) : !isPending ? (
                                     <AutoLane
                                         events={autoEvents}
                                         zoomRange={zoomRange}
                                         onZoomChange={setZoomRange}
+                                        classes={classes}
                                     />
-                                )}
+                                ) : null}
                             </div>
                         </div>
                     </div>
@@ -279,7 +271,7 @@ export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }:
                 </CardHeader>
                 <CardContent>
                     {draft ? (
-                        <div key={`${draft.start}-${draft.end}-${draft.suggestedApp}`} className="animate-in fade-in slide-in-from-top-2 duration-300">
+                        <div key={`${draft.start}-${draft.end}-${draft.suggestedCategory}`} className="animate-in fade-in slide-in-from-top-2 duration-300">
                             <div className="mb-4 text-sm text-muted-foreground">
                                 Selected Range: <span className="font-mono font-medium text-foreground">{formatTime(draft.start)} - {formatTime(draft.end)}</span> ({draft.end - draft.start} min)
                             </div>
@@ -288,8 +280,10 @@ export function TimelineView({ date, autoEvents, manualEvents, onEventCreated }:
                                     date: date.toISOString().split("T")[0],
                                     time: formatTime(draft.start),
                                     durationMinutes: draft.end - draft.start,
-                                    description: draft.suggestedApp || ""
+                                    title: draft.suggestedCategory || "",
+                                    category: draft.suggestedCategory || ""
                                 }}
+                                categories={Array.from(new Set(classes.map(c => c.name.join(" > "))))}
                                 onSuccess={handleEventCreated}
                             />
                         </div>
