@@ -1,3 +1,9 @@
+# AW Activities
+
+A dashboard for [ActivityWatch](https://activitywatch.net/): a timeline of tracked and manual activities, plus a breakdown by category. It reads from the local `aw-server` at `http://localhost:5600`.
+
+![Dashboard preview (mock data)](docs/dashboard.png)
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
